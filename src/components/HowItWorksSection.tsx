@@ -6,51 +6,57 @@ const steps = [
   {
     step: "01",
     icon: FileText,
-    title: "Create Contract",
-    description: "Draft your contract with terms, payment amounts, and conditions using our intuitive interface."
+    title: "Draft Contract",
+    description: "Create sophisticated contracts with advanced terms, multi-tier payment structures, and conditional logic using our AI-powered interface."
   },
   {
     step: "02",
     icon: UserCheck,
-    title: "Multi-Party Approval",
-    description: "Both parties review and digitally sign the contract. All signatures are recorded on the blockchain."
+    title: "Cryptographic Approval",
+    description: "All parties review and provide cryptographic signatures. Every interaction is recorded immutably on the Solana blockchain."
   },
   {
     step: "03",
     icon: Zap,
-    title: "Automatic Execution",
-    description: "Upon completion, smart contracts automatically release payments and update contract status."
+    title: "Autonomous Execution",
+    description: "Smart contracts autonomously verify conditions and execute payments with sub-second finality and zero human intervention."
   }
 ];
 
 export const HowItWorksSection = () => {
   return (
-    <section className="py-20 px-6 bg-gradient-to-br from-blue-50 to-purple-50">
-      <div className="container mx-auto">
-        <div className="text-center mb-16">
-          <h2 className="text-3xl md:text-5xl font-bold text-gray-900 mb-6">
-            How It Works
+    <section className="py-32 px-6 relative">
+      <div className="absolute inset-0 bg-gradient-to-r from-black/20 to-black/10 backdrop-blur-sm" />
+      
+      <div className="container mx-auto relative z-10">
+        <div className="text-center mb-20">
+          <h2 className="text-4xl md:text-6xl font-bold text-white mb-8">
+            How It
+            <span className="text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-cyan-400"> Works</span>
           </h2>
-          <p className="text-xl text-gray-600 max-w-2xl mx-auto">
-            Simple, secure, and efficient contract management in three easy steps.
+          <p className="text-xl text-gray-300 max-w-3xl mx-auto">
+            Three sophisticated steps to revolutionize your contract management workflow.
           </p>
         </div>
         
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8 relative">
           {/* Connection lines for desktop */}
-          <div className="hidden md:block absolute top-24 left-1/4 right-1/4 h-0.5 bg-gradient-to-r from-blue-300 to-purple-300"></div>
+          <div className="hidden md:block absolute top-24 left-1/4 right-1/4 h-0.5 bg-gradient-to-r from-blue-400/30 via-purple-400/30 to-cyan-400/30"></div>
           
           {steps.map((step, index) => (
-            <Card key={index} className="relative bg-white border-0 shadow-lg hover:shadow-xl transition-all duration-300">
-              <CardContent className="p-8 text-center">
-                <div className="w-16 h-16 bg-gradient-to-r from-blue-500 to-purple-500 rounded-full flex items-center justify-center mx-auto mb-6 relative z-10">
-                  <step.icon className="h-8 w-8 text-white" />
+            <Card 
+              key={index} 
+              className="relative bg-white/5 backdrop-blur-md border border-white/10 hover:bg-white/10 hover:border-white/20 transition-all duration-500 group"
+            >
+              <CardContent className="p-10 text-center">
+                <div className="w-20 h-20 bg-gradient-to-r from-blue-500/20 via-purple-500/20 to-cyan-500/20 backdrop-blur-md border border-white/20 rounded-3xl flex items-center justify-center mx-auto mb-8 relative z-10 group-hover:scale-110 group-hover:rotate-6 transition-all duration-300">
+                  <step.icon className="h-10 w-10 text-white" />
                 </div>
-                <div className="text-sm font-bold text-blue-600 mb-2">{step.step}</div>
-                <h3 className="text-2xl font-bold text-gray-900 mb-4">
+                <div className="text-sm font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-400 mb-4 text-lg">{step.step}</div>
+                <h3 className="text-2xl font-bold text-white mb-6 group-hover:text-blue-300 transition-colors duration-300">
                   {step.title}
                 </h3>
-                <p className="text-gray-600 leading-relaxed">
+                <p className="text-gray-400 leading-relaxed group-hover:text-gray-300 transition-colors duration-300">
                   {step.description}
                 </p>
               </CardContent>
