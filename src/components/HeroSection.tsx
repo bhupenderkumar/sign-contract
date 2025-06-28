@@ -1,8 +1,11 @@
 
 import { Button } from "@/components/ui/button";
 import { ArrowRight, Play } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 
 export const HeroSection = () => {
+  const navigate = useNavigate();
+
   return (
     <section className="relative px-6 py-32 lg:py-40 overflow-hidden">
       {/* Glassmorphism background */}
@@ -34,9 +37,10 @@ export const HeroSection = () => {
         <div className="flex flex-col sm:flex-row gap-6 justify-center items-center mb-16">
           <Button 
             size="lg" 
+            onClick={() => navigate('/create-contract')}
             className="bg-gradient-to-r from-blue-600/80 to-purple-600/80 backdrop-blur-md border border-white/20 hover:from-blue-500/90 hover:to-purple-500/90 text-white px-10 py-6 text-lg font-semibold rounded-2xl shadow-2xl hover:shadow-blue-500/25 transition-all duration-300 hover:scale-105 hover:-translate-y-1"
           >
-            Launch Platform
+            Create New Smart Contract
             <ArrowRight className="ml-2 h-5 w-5" />
           </Button>
           
