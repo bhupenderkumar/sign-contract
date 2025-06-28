@@ -5,49 +5,47 @@ import { Shield, Users, Zap, FileText, Bell, Smartphone } from "lucide-react";
 const features = [
   {
     icon: Shield,
-    title: "Quantum-Safe Security",
-    description: "Military-grade encryption with immutable blockchain records. Your contracts are protected by the most advanced cryptographic protocols."
+    title: "Enterprise Security",
+    description: "Bank-level encryption and security protocols to protect your sensitive contract data and ensure compliance with industry standards."
   },
   {
     icon: Users,
-    title: "Multi-Signature Workflow",
-    description: "Sophisticated approval system requiring cryptographic signatures from all parties before contract execution begins."
+    title: "Multi-Party Collaboration",
+    description: "Enable multiple parties to review, comment, and sign contracts with role-based permissions and approval workflows."
   },
   {
     icon: Zap,
-    title: "Lightning Execution",
-    description: "Smart contracts execute automatically upon completion, releasing payments instantly without human intervention or delays."
+    title: "Automated Execution",
+    description: "Smart contracts automatically execute terms and conditions, reducing manual oversight and ensuring timely fulfillment."
   },
   {
     icon: FileText,
-    title: "Distributed Storage",
-    description: "Contract documents distributed across IPFS with blockchain references for ultimate redundancy and accessibility."
+    title: "Document Management",
+    description: "Centralized storage and version control for all contract documents with easy search and retrieval capabilities."
   },
   {
     icon: Bell,
-    title: "Real-time Intelligence",
-    description: "Advanced notification system with instant updates for contract status, approvals, and payment releases."
+    title: "Real-time Notifications",
+    description: "Stay informed with instant notifications for contract status updates, approvals, deadlines, and renewals."
   },
   {
     icon: Smartphone,
-    title: "Intuitive Interface",
-    description: "Clean, modern dashboard designed for power users who demand both sophistication and simplicity."
+    title: "Mobile Access",
+    description: "Access and manage your contracts from anywhere with our responsive web interface and mobile-optimized experience."
   }
 ];
 
 export const FeaturesSection = () => {
   return (
-    <section className="py-32 px-6 relative">
-      <div className="absolute inset-0 bg-black/10 backdrop-blur-sm" />
-      
-      <div className="container mx-auto relative z-10">
-        <div className="text-center mb-20">
-          <h2 className="text-4xl md:text-6xl font-bold text-white mb-8">
-            Advanced
-            <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-400"> Features</span>
+    <section className="py-20 px-6 bg-slate-800/50">
+      <div className="container mx-auto">
+        <div className="text-center mb-16">
+          <h2 className="text-3xl md:text-5xl font-bold text-white mb-6">
+            Powerful Features for
+            <span className="text-blue-400"> Modern Business</span>
           </h2>
           <p className="text-xl text-gray-300 max-w-3xl mx-auto">
-            Built with cutting-edge blockchain technology for the next generation of contract management.
+            Everything you need to manage contracts efficiently, securely, and professionally.
           </p>
         </div>
         
@@ -55,16 +53,16 @@ export const FeaturesSection = () => {
           {features.map((feature, index) => (
             <Card 
               key={index} 
-              className="group bg-white/5 backdrop-blur-md border border-white/10 hover:bg-white/10 hover:border-white/20 transition-all duration-500 hover:-translate-y-2 hover:shadow-2xl hover:shadow-blue-500/10"
+              className="bg-white/5 border border-white/10 hover:bg-white/10 hover:border-white/20 transition-all duration-300"
             >
-              <CardContent className="p-8">
-                <div className="w-16 h-16 bg-gradient-to-r from-blue-500/20 to-purple-500/20 backdrop-blur-md border border-white/20 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 group-hover:rotate-6 transition-all duration-300">
-                  <feature.icon className="h-8 w-8 text-blue-300" />
+              <CardContent className="p-6">
+                <div className="w-12 h-12 bg-blue-500/20 rounded-lg flex items-center justify-center mb-4">
+                  <feature.icon className="h-6 w-6 text-blue-400" />
                 </div>
-                <h3 className="text-xl font-bold text-white mb-4 group-hover:text-blue-300 transition-colors duration-300">
+                <h3 className="text-xl font-bold text-white mb-3">
                   {feature.title}
                 </h3>
-                <p className="text-gray-400 leading-relaxed group-hover:text-gray-300 transition-colors duration-300">
+                <p className="text-gray-400 leading-relaxed">
                   {feature.description}
                 </p>
               </CardContent>
