@@ -77,13 +77,14 @@ export const HeroSection = () => {
             <ArrowRight className="ml-2 h-5 w-5" />
           </Button>
           
-          <Button 
-            variant="outline" 
-            size="lg" 
+          <Button
+            variant="outline"
+            size="lg"
+            onClick={() => navigate('/dashboard')}
             className="border-2 border-white/30 bg-transparent text-white hover:bg-white/10 px-8 py-4 text-lg font-semibold rounded-lg transition-all duration-300"
           >
-            <Play className="mr-2 h-5 w-5" />
-            Watch Demo
+            <Users className="mr-2 h-5 w-5" />
+            View Dashboard
           </Button>
         </div>
         
