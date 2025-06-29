@@ -32,18 +32,18 @@ export const HeroSection = () => {
         {/* Clear, professional heading */}
         <div className="mb-6">
           <h1 className="text-4xl md:text-6xl lg:text-7xl font-bold text-white mb-4 leading-tight">
-            Digital Contract
+            SecureContract
           </h1>
           <h1 className="text-4xl md:text-6xl lg:text-7xl font-bold text-blue-400 leading-tight">
-            Management
+            Pro
           </h1>
         </div>
         
         {/* Clear value proposition */}
         <div className="mb-12 max-w-4xl mx-auto">
           <p className="text-xl md:text-2xl text-gray-300 mb-8 leading-relaxed">
-            Create, sign, and manage digital contracts with blockchain security. 
-            Streamline your business agreements with automated execution and secure storage.
+            The professional solution for secure, legally binding digital contracts powered by Solana blockchain.
+            Trusted by businesses worldwide for efficient contract management and automated execution.
           </p>
           
           {/* Business benefits */}

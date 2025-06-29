@@ -1,3 +1,6 @@
+# SecureContract Pro - Professional Digital Contract Management
+# https://www.robotstxt.org/robotstxt.html
+
 User-agent: Googlebot
 Allow: /
 
@@ -12,3 +15,14 @@ Allow: /
 
 User-agent: *
 Allow: /
+
+# Disallow admin or sensitive areas
+Disallow: /api/
+Disallow: /_next/
+Disallow: /admin/
+
+# Sitemap location
+Sitemap: https://securecontract.pro/sitemap.xml
+
+# Crawl-delay for respectful crawling
+Crawl-delay: 1

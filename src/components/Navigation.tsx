@@ -56,7 +56,7 @@ const Navigation = () => {
             <div className="bg-blue-600 p-2 rounded-lg">
               <FileText className="h-6 w-6 text-white" />
             </div>
-            <span className="text-xl font-bold text-white">DigitalContract</span>
+            <span className="text-xl font-bold text-white">SecureContract Pro</span>
           </div>
 
           {/* Desktop Navigation */}
