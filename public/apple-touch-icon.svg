@@ -1,0 +1,38 @@
+<svg width="180" height="180" viewBox="0 0 180 180" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background with rounded corners for iOS -->
+  <rect width="180" height="180" rx="40" fill="#1e40af"/>
+  
+  <!-- Subtle background pattern -->
+  <defs>
+    <pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">
+      <path d="M 20 0 L 0 0 0 20" fill="none" stroke="#3b82f6" stroke-width="0.5" opacity="0.1"/>
+    </pattern>
+  </defs>
+  <rect width="180" height="180" fill="url(#grid)"/>
+  
+  <!-- Main document -->
+  <rect x="45" y="30" width="90" height="120" rx="8" fill="white" stroke="#e2e8f0" stroke-width="2"/>
+  
+  <!-- Document header -->
+  <rect x="45" y="30" width="90" height="25" rx="8" fill="#f8fafc"/>
+  <line x1="45" y1="55" x2="135" y2="55" stroke="#e2e8f0" stroke-width="1"/>
+  
+  <!-- Document lines -->
+  <line x1="55" y1="70" x2="115" y2="70" stroke="#1e40af" stroke-width="3" stroke-linecap="round"/>
+  <line x1="55" y1="85" x2="125" y2="85" stroke="#1e40af" stroke-width="3" stroke-linecap="round"/>
+  <line x1="55" y1="100" x2="105" y2="100" stroke="#1e40af" stroke-width="3" stroke-linecap="round"/>
+  <line x1="55" y1="115" x2="120" y2="115" stroke="#1e40af" stroke-width="3" stroke-linecap="round"/>
+  
+  <!-- Security shield -->
+  <circle cx="90" cy="90" r="25" fill="#10b981" stroke="#059669" stroke-width="3"/>
+  <path d="M90 70l15 10v15l-15 10-15-10v-15l15-10z" fill="#10b981" stroke="#059669" stroke-width="2"/>
+  <path d="M82 88l6 6 12-12" stroke="white" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  
+  <!-- Signature area -->
+  <rect x="55" y="125" width="70" height="15" rx="2" fill="#f1f5f9" stroke="#e2e8f0" stroke-width="1"/>
+  <line x1="60" y1="132" x2="100" y2="132" stroke="#6366f1" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="110" cy="132" r="4" fill="#6366f1"/>
+  
+  <!-- Corner accent -->
+  <path d="M140 40l-10-10h10v10z" fill="#3b82f6" opacity="0.3"/>
+</svg>

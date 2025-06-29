@@ -49,12 +49,24 @@ const Navigation = () => {
       <div className="container mx-auto px-6">
         <div className="flex items-center justify-between h-16">
           {/* Logo */}
-          <div 
-            className="flex items-center space-x-2 cursor-pointer"
+          <div
+            className="flex items-center space-x-3 cursor-pointer"
             onClick={() => navigate('/')}
           >
-            <div className="bg-blue-600 p-2 rounded-lg">
-              <FileText className="h-6 w-6 text-white" />
+            <div className="relative">
+              <img
+                src="/logo.svg"
+                alt="SecureContract Pro"
+                className="h-8 w-8"
+                onError={(e) => {
+                  // Fallback to icon if logo fails to load
+                  e.currentTarget.style.display = 'none';
+                  e.currentTarget.nextElementSibling.style.display = 'block';
+                }}
+              />
+              <div className="bg-blue-600 p-2 rounded-lg h-8 w-8 hidden">
+                <FileText className="h-4 w-4 text-white" />
+              </div>
             </div>
             <span className="text-xl font-bold text-white">SecureContract Pro</span>
           </div>
