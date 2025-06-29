@@ -162,7 +162,11 @@ app.post('/api/contracts', async (req, res) => {
       mediatorName,
       mediatorEmail,
       useMediator,
-      expiryDate
+      expiryDate,
+      // Blockchain-specific fields (when wallet signing is used)
+      blockchainTxHash,
+      contractAddress,
+      status
     } = req.body;
 
     // Validate required fields
@@ -206,6 +210,9 @@ app.post('/api/contracts', async (req, res) => {
     };
     const documentHash = calculateDocumentHash(contractData);
 
+    // Determine if this is a blockchain contract
+    const isBlockchainContract = status === 'blockchain_created' && blockchainTxHash;
+
     // Create contract in database
     const contract = new Contract({
       contractId,
@@ -217,19 +224,34 @@ app.post('/api/contracts', async (req, res) => {
       parties,
       mediator: useMediator ? { name: mediatorName, email: mediatorEmail } : undefined,
       useMediator,
-      status: 'pending',
+      status: isBlockchainContract ? 'solana_created' : 'pending',
       expiryDate: expiryDate ? new Date(expiryDate) : null,
-      blockchainNetwork: solanaCluster
+      blockchainNetwork: solanaCluster,
+      // Add blockchain-specific fields if this is a blockchain contract
+      ...(isBlockchainContract && {
+        blockchainTxHash,
+        contractAddress,
+        platformFee: 0.01 // Default platform fee
+      })
     });
 
     await contract.save();
 
     // Add audit log
-    await contract.addAuditLog('contract_created', party1PublicKey, {
-      title: contractTitle,
-      partiesCount: parties.length,
-      hasMediator: useMediator
-    });
+    await contract.addAuditLog(
+      isBlockchainContract ? 'contract_created_onchain' : 'contract_created',
+      party1PublicKey,
+      {
+        title: contractTitle,
+        partiesCount: parties.length,
+        hasMediator: useMediator,
+        ...(isBlockchainContract && {
+          transactionId: blockchainTxHash,
+          contractAddress,
+          platformFee: 0.01
+        })
+      }
+    );
 
     // Send email notifications to all parties
     try {
@@ -268,13 +290,28 @@ app.post('/api/contracts', async (req, res) => {
       success: true,
       contractId,
       documentHash,
-      message: 'Contract created successfully. Email notifications sent to all parties.',
+      ...(isBlockchainContract && {
+        transactionId: blockchainTxHash,
+        contractAddress,
+        platformFee: 0.01,
+        explorerUrl: `https://explorer.solana.com/tx/${blockchainTxHash}?cluster=devnet`
+      }),
+      message: isBlockchainContract
+        ? 'Contract created successfully on Solana blockchain. Email notifications sent to all parties.'
+        : 'Contract created successfully. Email notifications sent to all parties.',
       contract: {
         id: contractId,
         title: contractTitle,
         status: contract.status,
         parties: parties.map(p => ({ name: p.name, email: p.email })),
-        createdAt: contract.createdAt
+        createdAt: contract.createdAt,
+        ...(isBlockchainContract && {
+          blockchainInfo: {
+            network: solanaCluster,
+            transactionId: blockchainTxHash,
+            contractAddress
+          }
+        })
       }
     });
 

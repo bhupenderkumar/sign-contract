@@ -19,7 +19,6 @@ interface ContractFormData {
   party1Name: string;
   party1Email: string;
   party1PublicKey: string;
-  party1PrivateKey: string;
   party2Name: string;
   party2Email: string;
   party2PublicKey: string;
@@ -42,7 +41,6 @@ const ContractCreation = () => {
     party1Name: '',
     party1Email: '',
     party1PublicKey: '',
-    party1PrivateKey: '',
     party2Name: '',
     party2Email: '',
     party2PublicKey: '',
@@ -256,11 +254,11 @@ const ContractCreation = () => {
       return false;
     }
 
-    // Private Key Validation (if blockchain is enabled)
-    if (formData.useBlockchain && !formData.party1PrivateKey.trim()) {
+    // Wallet Connection Validation (if blockchain is enabled)
+    if (formData.useBlockchain && (!connected || !publicKey)) {
       toast({
-        title: "Validation Error",
-        description: "Private Key is required for blockchain deployment.",
+        title: "Wallet Not Connected",
+        description: "Please connect your wallet for blockchain deployment.",
         variant: "destructive",
       });
       return false;
@@ -350,10 +348,9 @@ const ContractCreation = () => {
       mediatorEmail: formData.mediatorEmail,
       useMediator: formData.useMediator,
       expiryDate: null, // Add expiry date if needed
-      ...(formData.useBlockchain && { party1PrivateKey: formData.party1PrivateKey })
     };
 
-    console.log('📤 Sending contract data:', { ...contractData, party1PrivateKey: '[HIDDEN]' });
+    console.log('📤 Sending contract data:', contractData);
 
     try {
       let response;
@@ -634,21 +631,15 @@ const ContractCreation = () => {
                     </div>
                     {formData.useBlockchain && (
                       <div className="space-y-2">
-                        <Label htmlFor="party1PrivateKey" className="text-slate-300">
-                          Private Key *
-                          <span className="text-xs text-yellow-400 ml-1">(Required for blockchain deployment)</span>
-                        </Label>
-                        <Input
-                          id="party1PrivateKey"
-                          type="password"
-                          value={formData.party1PrivateKey}
-                          onChange={(e) => handleInputChange('party1PrivateKey', e.target.value)}
-                          placeholder="Enter private key (kept secure)"
-                          className="bg-white/10 border-white/20 focus:border-blue-400 text-white"
-                          required={formData.useBlockchain} />
-                        <p className="text-xs text-slate-400">
-                          Your private key is used only to sign the blockchain transaction and is never stored.
-                        </p>
+                        <div className="p-3 bg-green-500/10 border border-green-500/20 rounded-lg">
+                          <div className="flex items-center space-x-2">
+                            <Shield className="h-4 w-4 text-green-400" />
+                            <span className="text-sm font-medium text-green-300">Wallet Signing Enabled</span>
+                          </div>
+                          <p className="text-xs text-green-200 mt-1">
+                            Your connected wallet will be used to securely sign the blockchain transaction. No private key required.
+                          </p>
+                        </div>
                       </div>
                     )}
                   </div>
@@ -929,7 +920,7 @@ const ContractCreation = () => {
                     !formData.contractTitle ||
                     !formData.party1PublicKey ||
                     !formData.party2PublicKey ||
-                    (formData.useBlockchain && !formData.party1PrivateKey)
+                    (formData.useBlockchain && (!connected || !publicKey))
                   }
                 >
                   {formData.useBlockchain ? (

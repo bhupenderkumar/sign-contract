@@ -1,0 +1,100 @@
+<svg width="1200" height="630" viewBox="0 0 1200 630" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background gradient -->
+  <defs>
+    <linearGradient id="bgGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0f172a;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#1e293b;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#334155;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="logoGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1e40af;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#3b82f6;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="textGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#ffffff;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#e2e8f0;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="1200" height="630" fill="url(#bgGradient)"/>
+  
+  <!-- Subtle pattern overlay -->
+  <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+    <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e40af" stroke-width="0.5" opacity="0.1"/>
+  </pattern>
+  <rect width="1200" height="630" fill="url(#grid)"/>
+  
+  <!-- Main logo (larger version) -->
+  <g transform="translate(100, 150)">
+    <!-- Logo background circle -->
+    <circle cx="80" cy="80" r="75" fill="url(#logoGradient)" stroke="#1e40af" stroke-width="3"/>
+    
+    <!-- Document -->
+    <rect x="40" y="30" width="50" height="70" rx="3" fill="white" stroke="#e2e8f0" stroke-width="2"/>
+    
+    <!-- Document lines -->
+    <line x1="45" y1="45" x2="80" y2="45" stroke="#1e40af" stroke-width="3" stroke-linecap="round"/>
+    <line x1="45" y1="55" x2="85" y2="55" stroke="#1e40af" stroke-width="3" stroke-linecap="round"/>
+    <line x1="45" y1="65" x2="75" y2="65" stroke="#1e40af" stroke-width="3" stroke-linecap="round"/>
+    <line x1="45" y1="75" x2="80" y2="75" stroke="#1e40af" stroke-width="3" stroke-linecap="round"/>
+    
+    <!-- Security shield -->
+    <circle cx="80" cy="80" r="20" fill="#10b981" stroke="#059669" stroke-width="2"/>
+    <path d="M80 65l12 8v12l-12 8-12-8v-12l12-8z" fill="#10b981" stroke="#059669" stroke-width="2"/>
+    <path d="M72 78l6 6 10-10" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    
+    <!-- Signature area -->
+    <rect x="45" y="85" width="35" height="8" rx="1" fill="#f1f5f9" stroke="#e2e8f0" stroke-width="1"/>
+    <line x1="50" y1="89" x2="70" y2="89" stroke="#6366f1" stroke-width="2" stroke-linecap="round"/>
+    <circle cx="75" cy="89" r="2" fill="#6366f1"/>
+  </g>
+  
+  <!-- Main heading -->
+  <text x="300" y="200" font-family="Arial, sans-serif" font-size="72" font-weight="bold" fill="url(#textGradient)">
+    SecureContract Pro
+  </text>
+  
+  <!-- Subheading -->
+  <text x="300" y="260" font-family="Arial, sans-serif" font-size="36" fill="#94a3b8">
+    Professional Digital Contract Management
+  </text>
+  
+  <!-- Feature highlights -->
+  <g transform="translate(300, 320)">
+    <!-- Blockchain Security -->
+    <g>
+      <circle cx="15" cy="15" r="8" fill="#10b981"/>
+      <path d="M11 15l3 3 6-6" stroke="white" stroke-width="2" stroke-linecap="round"/>
+      <text x="35" y="20" font-family="Arial, sans-serif" font-size="24" fill="#e2e8f0">
+        Blockchain Security with Solana
+      </text>
+    </g>
+    
+    <!-- Digital Signatures -->
+    <g transform="translate(0, 50)">
+      <circle cx="15" cy="15" r="8" fill="#6366f1"/>
+      <path d="M10 15l5 0M12 12l6 6" stroke="white" stroke-width="2" stroke-linecap="round"/>
+      <text x="35" y="20" font-family="Arial, sans-serif" font-size="24" fill="#e2e8f0">
+        Legally Binding Digital Signatures
+      </text>
+    </g>
+    
+    <!-- Trusted Platform -->
+    <g transform="translate(0, 100)">
+      <circle cx="15" cy="15" r="8" fill="#1e40af"/>
+      <path d="M15 8l4 3v6l-4 3-4-3v-6l4-3z" stroke="white" stroke-width="2" fill="none"/>
+      <text x="35" y="20" font-family="Arial, sans-serif" font-size="24" fill="#e2e8f0">
+        Trusted by Businesses Worldwide
+      </text>
+    </g>
+  </g>
+  
+  <!-- Bottom accent -->
+  <rect x="0" y="580" width="1200" height="50" fill="url(#logoGradient)" opacity="0.3"/>
+  
+  <!-- Website URL -->
+  <text x="600" y="610" font-family="Arial, sans-serif" font-size="20" fill="#94a3b8" text-anchor="middle">
+    securecontract.pro
+  </text>
+</svg>
