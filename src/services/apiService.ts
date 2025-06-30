@@ -1,3 +1,5 @@
+import { getCurrentNetwork } from '@/config/environment';
+
 const API_BASE_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
 
 interface ApiResponse<T = any> {
@@ -18,18 +20,22 @@ class ApiService {
     endpoint: string,
     options: RequestInit = {}
   ): Promise<ApiResponse<T>> {
-    const url = `${this.baseUrl}${endpoint}`;
-    
+    // Add network parameter to URL
+    const url = new URL(`${this.baseUrl}${endpoint}`);
+    const currentNetwork = getCurrentNetwork();
+    url.searchParams.set('network', currentNetwork);
+
     const defaultOptions: RequestInit = {
       headers: {
         'Content-Type': 'application/json',
+        'X-Solana-Network': currentNetwork,
         ...options.headers,
       },
       ...options,
     };
 
     try {
-      const response = await fetch(url, defaultOptions);
+      const response = await fetch(url.toString(), defaultOptions);
       const data = await response.json();
 
       if (!response.ok) {

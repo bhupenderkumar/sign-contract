@@ -2,27 +2,33 @@ import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Button } from "@/components/ui/button";
 import { useWallet } from '@/contexts/WalletContext';
-import { 
-  Home, 
-  Plus, 
-  LayoutDashboard, 
-  FileText, 
-  Menu, 
+import { useNetwork } from '@/contexts/NetworkContext';
+import { NetworkSelector } from '@/components/NetworkSelector';
+import { EnvironmentValidator } from '@/components/EnvironmentValidator';
+import {
+  Home,
+  Plus,
+  LayoutDashboard,
+  FileText,
+  Menu,
   X,
   Wallet,
-  LogOut
+  LogOut,
+  Zap
 } from "lucide-react";
 
 const Navigation = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { connected, publicKey, connect, disconnect } = useWallet();
+  const { currentNetwork, networkConfig } = useNetwork();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const navigationItems = [
     { path: '/', label: 'Home', icon: Home },
     { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, requiresWallet: true },
     { path: '/create-contract', label: 'Create Contract', icon: Plus },
+    { path: '/websocket-demo', label: 'WebSocket Demo', icon: Zap },
   ];
 
   const isActivePath = (path: string) => {
@@ -71,6 +77,11 @@ const Navigation = () => {
             <span className="text-xl font-bold text-white">SecureContract Pro</span>
           </div>
 
+          {/* Environment Validator */}
+          <div className="hidden lg:block">
+            <EnvironmentValidator />
+          </div>
+
           {/* Desktop Navigation */}
           <div className="hidden md:flex items-center space-x-1">
             {navigationItems.map((item) => {
@@ -102,6 +113,11 @@ const Navigation = () => {
                 </Button>
               );
             })}
+          </div>
+
+          {/* Network Selector */}
+          <div className="hidden md:flex">
+            <NetworkSelector />
           </div>
 
           {/* Wallet Connection */}

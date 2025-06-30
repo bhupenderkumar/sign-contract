@@ -10,7 +10,12 @@ class EmailService {
 
   async initializeTransporter() {
     // Configure email transporter to use Resend
-    const resendApiKey = process.env.RESEND_API_KEY || 're_J8oos3Wp_GPjKaMAtDtbqKZcppayQuxGu';
+    const resendApiKey = process.env.RESEND_API_KEY;
+
+    if (!resendApiKey) {
+      console.error('❌ RESEND_API_KEY environment variable is required but not set');
+      throw new Error('Email service configuration error: RESEND_API_KEY is required');
+    }
 
     if (resendApiKey && resendApiKey !== 'your-resend-api-key') {
       // Use Resend SMTP configuration

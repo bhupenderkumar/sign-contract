@@ -14,6 +14,14 @@ export const WalletConnection: React.FC = () => {
   const { setVisible } = useWalletModal();
   const { toast } = useToast();
   const [isConnecting, setIsConnecting] = useState(false);
+  const [showAutoConnectInfo, setShowAutoConnectInfo] = useState(false);
+
+  // Check if user has previously connected a wallet
+  React.useEffect(() => {
+    const storedWalletName = localStorage.getItem('walletName');
+    const wasConnected = localStorage.getItem('walletConnected') === 'true';
+    setShowAutoConnectInfo(storedWalletName && wasConnected && !connected);
+  }, [connected]);
 
   const handleConnect = async () => {
     if (connected) return;
@@ -114,6 +122,27 @@ export const WalletConnection: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      {/* Auto-Connect Info */}
+      {showAutoConnectInfo && (
+        <Card className="bg-blue-500/10 border-blue-500/20 backdrop-blur-sm">
+          <CardContent className="pt-6">
+            <div className="flex items-center space-x-3">
+              <AlertCircle className="h-5 w-5 text-blue-400" />
+              <div>
+                <h3 className="text-blue-400 font-semibold">Auto-Connect Available</h3>
+                <p className="text-slate-300 text-sm mt-1">
+                  You previously connected {localStorage.getItem('walletName')}.
+                  The wallet should auto-connect when you refresh the page.
+                </p>
+                <p className="text-slate-400 text-xs mt-2">
+                  If auto-connect isn't working, try manually connecting below or use the debug panel.
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Main Connection Card */}
       <Card className="bg-white/10 border-white/20 backdrop-blur-sm">
         <CardHeader className="text-center">
@@ -260,3 +289,5 @@ export const WalletConnection: React.FC = () => {
     </div>
   );
 };
+
+export default WalletConnection;

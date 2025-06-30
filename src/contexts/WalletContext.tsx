@@ -15,6 +15,7 @@ import {
 } from '@solana/wallet-adapter-wallets';
 import websocketService from '@/services/websocketService';
 import { validateWalletStorage, safeSetWalletStorage, safeGetWalletStorage, safeRemoveWalletStorage } from '@/utils/walletStorageUtils';
+import { getCurrentNetwork, getNetworkConfig } from '@/config/environment';
 
 // Import wallet adapter CSS
 import '@solana/wallet-adapter-react-ui/styles.css';
@@ -28,6 +29,7 @@ interface WalletContextType {
   balance: number | null;
   connect: () => Promise<void>;
   disconnect: () => Promise<void>;
+  forceDisconnect: () => Promise<void>;
   signTransaction: (transaction: Transaction) => Promise<Transaction>;
   signAllTransactions: (transactions: Transaction[]) => Promise<Transaction[]>;
   sendTransaction: (transaction: Transaction) => Promise<string>;
@@ -131,80 +133,50 @@ const WalletContextProvider: React.FC<WalletContextProviderProps> = ({ children 
     };
   }, []);
 
-  // Auto-connect wallet on page load with improved reliability
+  // Monitor wallet adapter auto-connect behavior
   useEffect(() => {
-    const autoConnect = async () => {
-      let storedWalletName = null;
-      let wasConnected = false;
+    if (!autoConnectAttempted) {
+      setAutoConnectAttempted(true);
 
-      try {
-        storedWalletName = safeGetWalletStorage('walletName');
-        wasConnected = safeGetWalletStorage('walletConnected') === 'true';
-      } catch (error) {
-        console.warn('Error reading wallet localStorage:', error);
-        clearCorruptedWalletData();
+      // Log the auto-connect attempt
+      const storedWalletName = safeGetWalletStorage('walletName');
+      const wasConnected = safeGetWalletStorage('walletConnected') === 'true';
+
+      if (storedWalletName && wasConnected) {
+        console.log('🔄 Wallet adapter should auto-connect to:', storedWalletName);
       }
+    }
+  }, [autoConnectAttempted]);
 
-      // Only auto-connect if user was previously connected and wallet is available
-      if (!autoConnectAttempted && !connected && !connecting && storedWalletName && wasConnected) {
-        setAutoConnectAttempted(true);
-        try {
-          console.log('🔄 Attempting auto-connect to previously used wallet:', storedWalletName);
-
-          // If no wallet is selected, try to select the stored one first
-          if (!wallet) {
-            const wallets = [
-              new PhantomWalletAdapter(),
-              new SolflareWalletAdapter(),
-              new TorusWalletAdapter(),
-            ];
-            const targetWallet = wallets.find(w => w.name === storedWalletName);
-            if (targetWallet) {
-              // This would require access to the select function from useWallet
-              console.log('🎯 Found target wallet, attempting to select:', targetWallet.name);
-            }
-          }
-
-          await solanaConnect();
-          console.log('✅ Auto-connect successful');
-          localStorage.setItem('walletConnected', 'true');
-        } catch (error) {
-          console.log('❌ Auto-connect failed:', error);
-          // Clear stored connection state if auto-connect fails
-          try {
-            localStorage.removeItem('walletConnected');
-          } catch (storageError) {
-            console.warn('Error clearing wallet connection state:', storageError);
-          }
-          // Don't clear walletName immediately, user might want to reconnect manually
-        }
-      } else {
-        setAutoConnectAttempted(true);
-      }
-    };
-
-    // Longer delay to ensure wallet adapters are fully ready
-    const timer = setTimeout(autoConnect, 1500);
-    return () => clearTimeout(timer);
-  }, [wallet, connected, connecting, autoConnectAttempted, solanaConnect]);
+  // Handle successful auto-connection
+  useEffect(() => {
+    if (connected && publicKey && wallet && !autoConnectAttempted) {
+      console.log('✅ Auto-connect successful via wallet adapter');
+      setAutoConnectAttempted(true);
+    }
+  }, [connected, publicKey, wallet, autoConnectAttempted]);
 
   // Handle wallet connection state changes
   useEffect(() => {
-    if (connected && publicKey) {
+    if (connected && publicKey && wallet?.adapter?.name) {
       // Update localStorage when wallet connects
-      if (wallet?.adapter?.name) {
-        try {
-          localStorage.setItem('walletName', wallet.adapter.name);
-          localStorage.setItem('walletConnected', 'true');
-          console.log('💾 Updated wallet connection state:', wallet.adapter.name);
-        } catch (error) {
-          console.warn('Error updating wallet connection state:', error);
-        }
+      try {
+        localStorage.setItem('walletName', wallet.adapter.name);
+        localStorage.setItem('walletConnected', 'true');
+
+        // Also set the standard Solana wallet adapter keys for better compatibility
+        localStorage.setItem('solana-wallet-adapter-auto-connect', 'true');
+        localStorage.setItem('solana-wallet-adapter-wallet-name', wallet.adapter.name);
+
+        console.log('💾 Updated wallet connection state:', wallet.adapter.name);
+      } catch (error) {
+        console.warn('Error updating wallet connection state:', error);
       }
     } else if (!connected) {
-      // Clear connection state when wallet disconnects
+      // Only clear connection state, keep wallet name for next time
       try {
         localStorage.removeItem('walletConnected');
+        localStorage.setItem('solana-wallet-adapter-auto-connect', 'false');
         console.log('🗑️ Cleared wallet connection state on disconnect');
       } catch (error) {
         console.warn('Error clearing wallet connection state on disconnect:', error);
@@ -218,6 +190,31 @@ const WalletContextProvider: React.FC<WalletContextProviderProps> = ({ children 
       try {
         websocketService.connectWallet(publicKey.toString());
         console.log('✅ Wallet connected to WebSocket service');
+
+        // Set up wallet-specific event listeners
+        const handleWalletConnected = (data: any) => {
+          if (data.publicKey === publicKey.toString()) {
+            console.log('✅ Wallet connection confirmed by backend:', data);
+            setBalance(data.balance || 0);
+          }
+        };
+
+        const handleWalletDisconnected = (data: any) => {
+          if (data.publicKey === publicKey.toString()) {
+            console.log('✅ Wallet disconnection confirmed by backend:', data);
+            setBalance(0);
+          }
+        };
+
+        websocketService.on('wallet_connected', handleWalletConnected);
+        websocketService.on('wallet_disconnected', handleWalletDisconnected);
+
+        // Cleanup function to remove listeners
+        return () => {
+          websocketService.off('wallet_connected', handleWalletConnected);
+          websocketService.off('wallet_disconnected', handleWalletDisconnected);
+        };
+
       } catch (error) {
         console.error('❌ Failed to connect wallet to WebSocket:', error);
       }
@@ -271,11 +268,11 @@ const WalletContextProvider: React.FC<WalletContextProviderProps> = ({ children 
     try {
       await solanaDisconnect();
       setBalance(null);
-      // Clear stored wallet connection state
+      // Clear connection state but keep wallet name for easier reconnection
       try {
-        localStorage.removeItem('walletName');
         localStorage.removeItem('walletConnected');
-        console.log('🗑️ Cleared wallet connection state');
+        localStorage.setItem('solana-wallet-adapter-auto-connect', 'false');
+        console.log('🗑️ Cleared wallet connection state (keeping wallet name for easier reconnection)');
       } catch (error) {
         console.warn('Error clearing wallet connection state:', error);
       }
@@ -284,10 +281,34 @@ const WalletContextProvider: React.FC<WalletContextProviderProps> = ({ children 
       // Clear state even if disconnect fails
       try {
         localStorage.removeItem('walletConnected');
+        localStorage.setItem('solana-wallet-adapter-auto-connect', 'false');
       } catch (error) {
         console.warn('Error clearing wallet connection state on error:', error);
       }
       throw error;
+    }
+  };
+
+  // Force clear all wallet data (useful for troubleshooting)
+  const forceDisconnect = async () => {
+    try {
+      await solanaDisconnect();
+    } catch (error) {
+      console.warn('Error during wallet disconnect:', error);
+    }
+
+    setBalance(null);
+
+    // Clear all wallet-related localStorage
+    try {
+      localStorage.removeItem('walletName');
+      localStorage.removeItem('walletConnected');
+      localStorage.removeItem('solana-wallet-adapter-auto-connect');
+      localStorage.removeItem('solana-wallet-adapter-wallet-name');
+      localStorage.removeItem('solana-wallet-adapter-selected-wallet');
+      console.log('🗑️ Force cleared all wallet data');
+    } catch (error) {
+      console.warn('Error force clearing wallet data:', error);
     }
   };
 
@@ -300,6 +321,7 @@ const WalletContextProvider: React.FC<WalletContextProviderProps> = ({ children 
     balance,
     connect,
     disconnect,
+    forceDisconnect,
     signTransaction: signTransaction || (() => Promise.reject(new Error('signTransaction not available'))),
     signAllTransactions: signAllTransactions || (() => Promise.reject(new Error('signAllTransactions not available'))),
     sendTransaction: sendTransaction || (() => Promise.reject(new Error('sendTransaction not available'))),
@@ -337,29 +359,46 @@ export const WalletProviderWrapper: React.FC<WalletProviderProps> = ({ children 
     new TorusWalletAdapter(),
   ];
 
-  // Use multiple RPC endpoints for better reliability
+  // Use network configuration for RPC endpoints
   const getEndpoint = () => {
-    if (process.env.NODE_ENV === 'production') {
-      return clusterApiUrl('mainnet-beta');
+    const currentNetwork = getCurrentNetwork();
+    const networkConfig = getNetworkConfig(currentNetwork);
+
+    // Use the configured RPC URL for the current network
+    return networkConfig.rpcUrl;
+  };
+
+  // Check if auto-connect should be enabled
+  const shouldAutoConnect = () => {
+    try {
+      const wasConnected = localStorage.getItem('walletConnected') === 'true';
+      const walletName = localStorage.getItem('walletName');
+      return wasConnected && walletName;
+    } catch (error) {
+      console.warn('Error checking auto-connect state:', error);
+      return false;
     }
-
-    // For development, try multiple devnet endpoints
-    const devnetEndpoints = [
-      'https://api.devnet.solana.com',
-      'https://devnet.helius-rpc.com',
-      'https://rpc-devnet.helius.xyz',
-      clusterApiUrl('devnet')
-    ];
-
-    // Return the first endpoint (can be enhanced to test connectivity)
-    return devnetEndpoints[0];
   };
 
   const endpoint = getEndpoint();
 
   return (
     <ConnectionProvider endpoint={endpoint}>
-      <WalletProvider wallets={wallets} autoConnect={false}>
+      <WalletProvider
+        wallets={wallets}
+        autoConnect={shouldAutoConnect()}
+        onError={(error) => {
+          console.error('Wallet error:', error);
+          // Clear connection state if there's a persistent error
+          if (error.message?.includes('User rejected') === false) {
+            try {
+              localStorage.removeItem('walletConnected');
+            } catch (e) {
+              console.warn('Error clearing wallet state:', e);
+            }
+          }
+        }}
+      >
         <WalletModalProvider>
           <WalletContextProvider>
             {children}

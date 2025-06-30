@@ -1,3 +1,5 @@
+// Load environment variables from .env.local first, then .env
+require('dotenv').config({ path: '.env.local' });
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -20,6 +22,15 @@ const websocketService = require('./services/websocketService');
 const PDFService = require('./services/pdfService');
 const SolanaContractService = require('./services/solanaContractService');
 
+// Import Environment Configuration
+const {
+  getCurrentNetwork,
+  getNetworkConfig,
+  validateEnvironment,
+  getEnvironmentInfo,
+  networkMiddleware
+} = require('./config/environment');
+
 // Load the IDL
 const idl = require("/home/bhupek/digitalcontract/sign-contract/solana-contract/digital_contract/target/idl/digital_contract.json");
 
@@ -31,9 +42,9 @@ app.use(bodyParser.urlencoded({ extended: true, limit: '50mb' }));
 
 // MongoDB Connection
 const mongoUri = process.env.MONGO_URI || 'mongodb://localhost:27017/digital_contracts';
-mongoose.connect(mongoUri, { useNewUrlParser: true, useUnifiedTopology: true })
-  .then(() => console.log('MongoDB connected'))
-  .catch(err => console.error('MongoDB connection error:', err));
+mongoose.connect(mongoUri)
+  .then(() => console.log('✅ MongoDB connected'))
+  .catch(err => console.error('❌ MongoDB connection error:', err));
 
 // IPFS Client (optional, can be disabled if not available)
 let ipfs = null;
@@ -49,9 +60,23 @@ try {
   console.warn('IPFS not available:', error.message);
 }
 
-// Solana Connection
-const solanaCluster = process.env.SOLANA_CLUSTER || 'devnet';
-const connection = new Connection(clusterApiUrl(solanaCluster), 'confirmed');
+// Validate environment on startup
+console.log('🔍 Validating environment...');
+const envValidation = validateEnvironment();
+if (!envValidation.isValid) {
+  console.error('❌ Environment validation failed:');
+  envValidation.errors.forEach(error => console.error(`  - ${error}`));
+  process.exit(1);
+}
+console.log('✅ Environment validation passed');
+
+// Solana Connection using environment configuration
+const currentNetwork = getCurrentNetwork();
+const networkConfig = getNetworkConfig(currentNetwork);
+const connection = new Connection(networkConfig.rpcUrl, 'confirmed');
+
+console.log(`🔗 Solana Network: ${networkConfig.displayName} (${currentNetwork})`);
+console.log(`🌐 RPC Endpoint: ${networkConfig.rpcUrl}`);
 
 // Solana Program ID (Deployed to Devnet)
 const programId = new PublicKey("4bmYTgHAoYfBBwoELVqUzc9n8DTfFvtt7CodYq78wzir");
@@ -97,19 +122,42 @@ const calculateDocumentHash = (contractData) => {
   return crypto.createHash('sha256').update(dataString).digest('hex');
 };
 
+// Apply network middleware to all API routes
+app.use('/api', networkMiddleware);
+
 // Basic route
 app.get('/', (req, res) => {
   res.json({
     message: 'Digital Contract API is running!',
     version: '1.0.0',
+    network: currentNetwork,
     endpoints: {
       'POST /api/contracts': 'Create a new contract',
       'GET /api/contracts/:id': 'Get contract details',
       'POST /api/contracts/:id/sign': 'Sign a contract',
       'GET /api/contracts/user/:publicKey': 'Get contracts for a user',
-      'POST /api/users': 'Create or update user profile'
+      'POST /api/users': 'Create or update user profile',
+      'GET /api/environment': 'Get environment information'
     }
   });
+});
+
+// Environment information endpoint
+app.get('/api/environment', (req, res) => {
+  try {
+    const envInfo = getEnvironmentInfo();
+    res.json({
+      success: true,
+      environment: envInfo,
+      requestNetwork: req.solanaNetwork,
+      requestNetworkConfig: req.networkConfig
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
 });
 
 // Health check endpoint
@@ -1432,7 +1480,8 @@ const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
   console.log(`🚀 Digital Contract API Server running on port ${PORT}`);
   console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`🔗 Solana Cluster: ${solanaCluster}`);
+  console.log(`🔗 Solana Network: ${networkConfig.displayName} (${currentNetwork})`);
+  console.log(`🌐 RPC Endpoint: ${networkConfig.rpcUrl}`);
   console.log(`💾 MongoDB: ${mongoUri}`);
   console.log(`📡 IPFS: ${ipfs ? 'Available' : 'Not configured'}`);
 });

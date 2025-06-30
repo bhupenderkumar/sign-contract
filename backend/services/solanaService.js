@@ -1,5 +1,6 @@
 const { Connection, PublicKey, clusterApiUrl } = require('@solana/web3.js');
 const EventEmitter = require('events');
+const { getNetworkConfig, getCurrentNetwork } = require('../config/environment');
 
 class SolanaService extends EventEmitter {
   constructor() {
@@ -16,12 +17,12 @@ class SolanaService extends EventEmitter {
   }
 
   initializeConnections() {
-    const endpoints = [
-      'https://api.devnet.solana.com',
-      'https://devnet.helius-rpc.com',
-      'https://rpc-devnet.helius.xyz',
-      clusterApiUrl('devnet')
-    ];
+    // Get endpoints for current network
+    const currentNetwork = getCurrentNetwork();
+    const networkConfig = getNetworkConfig(currentNetwork);
+    const endpoints = networkConfig.alternativeEndpoints || [networkConfig.rpcUrl];
+
+    console.log(`🔗 Initializing Solana connections for ${networkConfig.displayName}`);
 
     endpoints.forEach((endpoint, index) => {
       try {

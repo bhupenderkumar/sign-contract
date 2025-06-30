@@ -43,11 +43,11 @@ Either party may terminate this agreement with 30 days written notice.`,
   ],
   
   party1Name: "Alice Johnson",
-  party1Email: "rajus9231@gmail.com",
+  party1Email: "alice.johnson@example.com",
   party1PublicKey: DEV_SAMPLE_KEYS.party1,
-  
+
   party2Name: "Bob Smith",
-  party2Email: "rajus9231@gmail.com",
+  party2Email: "bob.smith@example.com",
   party2PublicKey: DEV_SAMPLE_KEYS.party2,
   
   mediatorName: "Carol Wilson",

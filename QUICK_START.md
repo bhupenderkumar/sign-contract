@@ -1,5 +1,26 @@
 # 🚀 Quick Start Guide - Digital Contract Platform
 
+## 🌐 Network Environment Selection
+
+SecureContract Pro now supports comprehensive Solana network environment selection with enhanced security features:
+- **Devnet**: Development network with free SOL
+- **Testnet**: Testing network with free SOL
+- **Mainnet-Beta**: Production network with real SOL
+
+📖 **See the [Network Environment Guide](./NETWORK_ENVIRONMENT_GUIDE.md) for detailed setup and usage instructions.**
+
+## 🔧 Local Environment Setup
+
+For local development, you'll need to set up `.env.local` files with actual configuration values:
+
+### Quick Setup
+```bash
+# Run the interactive setup script
+./scripts/setup-local-env.sh
+```
+
+📖 **See the [Local Environment Setup Guide](./LOCAL_ENVIRONMENT_SETUP.md) for detailed instructions.**
+
 ## 🎯 What's Been Completed
 
 ✅ **Complete End-to-End Implementation**

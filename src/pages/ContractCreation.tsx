@@ -12,6 +12,7 @@ import { useToast } from "@/components/ui/use-toast";
 import { Toaster } from "@/components/ui/toaster";
 import { getDevConfig, isDevelopment } from '@/config/development';
 import { useWallet } from '@/contexts/WalletContext';
+import { useWalletWebSocket } from '@/hooks/useWalletWebSocket';
 import walletTransactionService from '@/services/walletTransactionService';
 import CryptoJS from 'crypto-js';
 
@@ -37,6 +38,18 @@ interface ContractFormData {
 
 const ContractCreation = () => {
   const navigate = useNavigate();
+  const { toast } = useToast();
+  const { connected, publicKey } = useWallet();
+  const {
+    isWalletReady,
+    loading: wsLoading,
+    error: wsError,
+    contractPricing,
+    requestContractPricing,
+    clearError,
+    clearResults
+  } = useWalletWebSocket();
+
   const [formData, setFormData] = useState<ContractFormData>({
     party1Name: '',
     party1Email: '',
@@ -61,8 +74,7 @@ const ContractCreation = () => {
   const [newPartyEmail, setNewPartyEmail] = useState('');
   const [newPartyPublicKey, setNewPartyPublicKey] = useState('');
   const [activeTab, setActiveTab] = useState('text');
-  const { toast } = useToast();
-  const { publicKey, connected, signMessage, signTransaction } = useWallet();
+  const { signMessage, signTransaction } = useWallet();
 
   // Development auto-fill functionality
   const devConfig = getDevConfig();
@@ -322,6 +334,46 @@ const ContractCreation = () => {
     }
 
     return true;
+  };
+
+  // Request contract pricing via WebSocket (only when wallet is connected)
+  const handleRequestPricing = async () => {
+    if (!isWalletReady) {
+      toast({
+        title: "Wallet Required",
+        description: "Please connect your wallet to request contract pricing.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!validateForm()) {
+      toast({
+        title: "Form Incomplete",
+        description: "Please fill in all required fields before requesting pricing.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      clearError();
+      clearResults();
+
+      await requestContractPricing(formData);
+
+      toast({
+        title: "Pricing Requested",
+        description: "Contract pricing calculation in progress...",
+        variant: "default",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Pricing Request Failed",
+        description: error.message || "Failed to request contract pricing",
+        variant: "destructive",
+      });
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -902,6 +954,66 @@ const ContractCreation = () => {
                   </Label>
                 </div>
               </div>
+
+              {/* Wallet Connection Notice */}
+              {!isWalletReady && (
+                <div className="pt-6 border-t border-white/20">
+                  <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-4">
+                    <div className="flex items-center space-x-3">
+                      <Shield className="h-5 w-5 text-blue-400" />
+                      <div>
+                        <h3 className="text-blue-400 font-semibold">Wallet Connection Required</h3>
+                        <p className="text-slate-300 text-sm mt-1">
+                          Connect your wallet to access pricing information and blockchain features.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Pricing Section */}
+              {isWalletReady && (
+                <div className="pt-6 border-t border-white/20">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-semibold text-white">Contract Pricing</h3>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={handleRequestPricing}
+                      disabled={wsLoading}
+                      className="bg-white/10 border-white/20 text-white hover:bg-white/20"
+                    >
+                      {wsLoading ? 'Calculating...' : 'Get Pricing'}
+                    </Button>
+                  </div>
+
+                  {contractPricing && (
+                    <div className="bg-white/5 rounded-lg p-4 mb-4">
+                      <div className="grid grid-cols-2 gap-4 text-sm">
+                        <div>
+                          <span className="text-slate-300">Base Fee:</span>
+                          <span className="text-white ml-2">{contractPricing.baseFee} SOL</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-300">Complexity:</span>
+                          <span className="text-white ml-2">{contractPricing.complexityMultiplier}x</span>
+                        </div>
+                        <div className="col-span-2 pt-2 border-t border-white/10">
+                          <span className="text-slate-300">Total Fee:</span>
+                          <span className="text-green-400 ml-2 font-semibold">{contractPricing.totalFee} SOL</span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {wsError && (
+                    <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-3 mb-4">
+                      <p className="text-red-400 text-sm">{wsError}</p>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Submit Button */}
               <div className="pt-6 border-t border-white/20">

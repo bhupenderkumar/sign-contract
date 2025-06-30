@@ -19,6 +19,8 @@ import {
 } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
 import { useWallet } from '@/contexts/WalletContext';
+import { useNetwork } from '@/contexts/NetworkContext';
+import { NetworkSelector, NetworkStatus } from '@/components/NetworkSelector';
 import { getDevConfig, DEV_SAMPLE_KEYS } from '@/config/development';
 import websocketService from '@/services/websocketService';
 import apiService from '@/services/apiService';
@@ -26,6 +28,7 @@ import apiService from '@/services/apiService';
 export const DevPanel: React.FC = () => {
   const { toast } = useToast();
   const { publicKey, connected, balance, websocketConnected, solanaStatus } = useWallet();
+  const { currentNetwork, networkConfig, environmentValid, environmentErrors } = useNetwork();
   const [contractId, setContractId] = useState('');
   const [activateLoading, setActivateLoading] = useState(false);
   const [solanaStatusData, setSolanaStatusData] = useState<any>(null);
@@ -225,8 +228,9 @@ export const DevPanel: React.FC = () => {
         </CardHeader>
         <CardContent className="space-y-4">
           <Tabs defaultValue="wallet" className="w-full">
-            <TabsList className="grid w-full grid-cols-4 bg-slate-800">
+            <TabsList className="grid w-full grid-cols-5 bg-slate-800">
               <TabsTrigger value="wallet" className="text-xs">Wallet</TabsTrigger>
+              <TabsTrigger value="network" className="text-xs">Network</TabsTrigger>
               <TabsTrigger value="services" className="text-xs">Services</TabsTrigger>
               <TabsTrigger value="contracts" className="text-xs">Contracts</TabsTrigger>
               <TabsTrigger value="backend" className="text-xs">Backend</TabsTrigger>
@@ -285,6 +289,48 @@ export const DevPanel: React.FC = () => {
                     </Button>
                   </div>
                 ))}
+              </div>
+            </TabsContent>
+
+            <TabsContent value="network" className="space-y-3">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-slate-400">Current Network:</span>
+                  <Badge variant={networkConfig.isProduction ? "destructive" : "default"} className="text-xs">
+                    {networkConfig.displayName}
+                  </Badge>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-slate-400">Environment:</span>
+                  <Badge variant={environmentValid ? "default" : "destructive"} className="text-xs">
+                    {environmentValid ? "Valid" : "Invalid"}
+                  </Badge>
+                </div>
+
+                {!environmentValid && (
+                  <div className="space-y-1">
+                    <span className="text-xs text-slate-400">Errors:</span>
+                    <div className="space-y-1 max-h-16 overflow-y-auto">
+                      {environmentErrors.map((error, index) => (
+                        <div key={index} className="text-xs text-red-400 bg-red-500/10 p-1 rounded">
+                          {error}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="space-y-1">
+                  <span className="text-xs text-slate-400">RPC Endpoint:</span>
+                  <div className="text-xs text-slate-300 font-mono bg-slate-800 p-1 rounded truncate">
+                    {networkConfig.rpcUrl}
+                  </div>
+                </div>
+
+                <div className="pt-2">
+                  <NetworkSelector showFullSelector={false} className="justify-center" />
+                </div>
               </div>
             </TabsContent>
 

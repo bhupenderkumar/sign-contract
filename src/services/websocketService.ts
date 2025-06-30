@@ -1,4 +1,5 @@
 import { io, Socket } from 'socket.io-client';
+import { getCurrentNetwork } from '@/config/environment';
 
 interface BalanceUpdate {
   publicKey: string;
@@ -36,6 +37,7 @@ class WebSocketService {
   private reconnectDelay = 1000;
   private listeners: Map<string, Set<Function>> = new Map();
   private isConnecting = false;
+  private connectedWallet: string | null = null;
 
   constructor() {
     this.initializeEventListeners();
@@ -167,6 +169,40 @@ class WebSocketService {
     this.socket.on('pong', (data: { timestamp: number }) => {
       this.emit('pong', data);
     });
+
+    // Contract-related event handlers
+    this.socket.on('contract_pricing_response', (data: any) => {
+      this.emit('contract_pricing_response', data);
+    });
+
+    this.socket.on('contract_pricing_error', (data: { error: string; publicKey: string }) => {
+      this.emit('contract_pricing_error', data);
+    });
+
+    this.socket.on('contract_created', (data: any) => {
+      this.emit('contract_created', data);
+    });
+
+    this.socket.on('contract_creation_error', (data: { error: string; publicKey: string }) => {
+      this.emit('contract_creation_error', data);
+    });
+
+    this.socket.on('contract_signed', (data: any) => {
+      this.emit('contract_signed', data);
+    });
+
+    this.socket.on('contract_signing_error', (data: { error: string; publicKey: string }) => {
+      this.emit('contract_signing_error', data);
+    });
+
+    // Wallet connection events
+    this.socket.on('wallet_connected', (data: any) => {
+      this.emit('wallet_connected', data);
+    });
+
+    this.socket.on('wallet_disconnected', (data: any) => {
+      this.emit('wallet_disconnected', data);
+    });
   }
 
   disconnect() {
@@ -183,48 +219,135 @@ class WebSocketService {
     if (!this.socket?.connected) {
       throw new Error('WebSocket not connected');
     }
-    
-    this.socket.emit('wallet_connect', { publicKey });
+
+    const currentNetwork = getCurrentNetwork();
+    this.connectedWallet = publicKey;
+    this.socket.emit('wallet_connect', {
+      publicKey,
+      network: currentNetwork
+    });
   }
 
   disconnectWallet(publicKey: string) {
     if (!this.socket?.connected) {
       throw new Error('WebSocket not connected');
     }
-    
+
+    this.connectedWallet = null;
     this.socket.emit('wallet_disconnect', { publicKey });
   }
 
-  // Solana operations
-  getBalance(publicKey: string) {
+  // Check if wallet is connected and operations are allowed
+  isWalletConnected(): boolean {
+    return this.socket?.connected && this.connectedWallet !== null;
+  }
+
+  getConnectedWallet(): string | null {
+    return this.connectedWallet;
+  }
+
+  // Wallet-dependent operations (require wallet connection)
+  getBalance(publicKey?: string) {
     if (!this.socket?.connected) {
       throw new Error('WebSocket not connected');
     }
-    
-    this.socket.emit('get_balance', { publicKey });
+
+    const targetPublicKey = publicKey || this.connectedWallet;
+    if (!targetPublicKey) {
+      throw new Error('Wallet must be connected to get balance');
+    }
+
+    if (this.connectedWallet && targetPublicKey !== this.connectedWallet) {
+      throw new Error('Can only get balance for connected wallet');
+    }
+
+    this.socket.emit('get_balance', { publicKey: targetPublicKey });
   }
 
+  getAccountInfo(publicKey?: string) {
+    if (!this.socket?.connected) {
+      throw new Error('WebSocket not connected');
+    }
+
+    const targetPublicKey = publicKey || this.connectedWallet;
+    if (!targetPublicKey) {
+      throw new Error('Wallet must be connected to get account info');
+    }
+
+    if (this.connectedWallet && targetPublicKey !== this.connectedWallet) {
+      throw new Error('Can only get account info for connected wallet');
+    }
+
+    this.socket.emit('get_account_info', { publicKey: targetPublicKey });
+  }
+
+  // Contract operations (require wallet context)
+  requestContractPricing(contractData: any, publicKey?: string) {
+    if (!this.isWalletConnected()) {
+      throw new Error('Wallet must be connected to request contract pricing');
+    }
+
+    const targetPublicKey = publicKey || this.connectedWallet;
+    if (!targetPublicKey) {
+      throw new Error('Public key required for contract pricing');
+    }
+
+    this.socket.emit('request_contract_pricing', {
+      contractData,
+      publicKey: targetPublicKey,
+      timestamp: Date.now()
+    });
+  }
+
+  createContract(contractData: any, publicKey?: string) {
+    if (!this.isWalletConnected()) {
+      throw new Error('Wallet must be connected to create contracts');
+    }
+
+    const targetPublicKey = publicKey || this.connectedWallet;
+    if (!targetPublicKey) {
+      throw new Error('Public key required for contract creation');
+    }
+
+    this.socket.emit('create_contract', {
+      contractData,
+      publicKey: targetPublicKey,
+      timestamp: Date.now()
+    });
+  }
+
+  signContract(contractId: string, signature: string, publicKey?: string) {
+    if (!this.isWalletConnected()) {
+      throw new Error('Wallet must be connected to sign contracts');
+    }
+
+    const targetPublicKey = publicKey || this.connectedWallet;
+    if (!targetPublicKey) {
+      throw new Error('Public key required for contract signing');
+    }
+
+    this.socket.emit('sign_contract', {
+      contractId,
+      publicKey: targetPublicKey,
+      signature,
+      timestamp: Date.now()
+    });
+  }
+
+  // Wallet-independent operations (can be called without wallet)
   getTransaction(signature: string) {
     if (!this.socket?.connected) {
       throw new Error('WebSocket not connected');
     }
-    
-    this.socket.emit('get_transaction', { signature });
-  }
 
-  getAccountInfo(publicKey: string) {
-    if (!this.socket?.connected) {
-      throw new Error('WebSocket not connected');
-    }
-    
-    this.socket.emit('get_account_info', { publicKey });
+    this.socket.emit('get_transaction', { signature });
   }
 
   getSolanaStatus() {
     if (!this.socket?.connected) {
       throw new Error('WebSocket not connected');
     }
-    
+
     this.socket.emit('get_solana_status');
   }
 
@@ -233,7 +356,7 @@ class WebSocketService {
     if (!this.socket?.connected) {
       throw new Error('WebSocket not connected');
     }
-    
+
     this.socket.emit('ping');
   }
 
@@ -247,6 +370,16 @@ class WebSocketService {
     this.listeners.set('balance_error', new Set());
     this.listeners.set('connection_error', new Set());
     this.listeners.set('pong', new Set());
+
+    // Contract-related events
+    this.listeners.set('contract_pricing_response', new Set());
+    this.listeners.set('contract_pricing_error', new Set());
+    this.listeners.set('contract_created', new Set());
+    this.listeners.set('contract_creation_error', new Set());
+    this.listeners.set('contract_signed', new Set());
+    this.listeners.set('contract_signing_error', new Set());
+    this.listeners.set('wallet_connected', new Set());
+    this.listeners.set('wallet_disconnected', new Set());
   }
 
   on(event: string, callback: Function) {

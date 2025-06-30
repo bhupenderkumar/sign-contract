@@ -35,6 +35,15 @@ backend/.env.development
 backend/.env.production
 backend/.env.test
 
+# Local environment files (never commit these)
+**/.env.local
+**/env.local
+.env.*.local
+
+# Development keypairs (never commit these)
+**/dev-keypair.json
+**/*-keypair.json
+
 # API keys and secrets
 **/secrets/
 **/*secret*
