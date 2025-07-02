@@ -140,7 +140,7 @@ const WalletContextProvider: React.FC<WalletContextProviderProps> = ({ children 
       const wasConnected = safeGetWalletStorage('walletConnected') === 'true';
       const autoConnectEnabled = safeGetWalletStorage('solana-wallet-adapter-auto-connect') !== 'false';
 
-      console.log('🔄 Auto-connect attempt:', {
+      console.log('🔄 Auto-connect check:', {
         storedWalletName,
         wasConnected,
         autoConnectEnabled,
@@ -148,18 +148,12 @@ const WalletContextProvider: React.FC<WalletContextProviderProps> = ({ children 
         connected
       });
 
-      if (storedWalletName && wasConnected && autoConnectEnabled && !connected) {
-        // If we have a stored wallet but it's not the current one, we need to wait for wallet selection
-        if (!wallet || wallet.adapter.name !== storedWalletName) {
-          console.log('⏳ Waiting for wallet adapter to initialize with stored wallet:', storedWalletName);
-          // Don't mark as attempted yet, let the wallet adapter handle it
-          return;
-        }
-
-        console.log('🔄 Attempting auto-connect to:', storedWalletName);
-      }
-
+      // Mark as attempted after initial check
       setAutoConnectAttempted(true);
+
+      if (storedWalletName && wasConnected && autoConnectEnabled && !connected) {
+        console.log('✅ Auto-connect should be handled by WalletProvider for:', storedWalletName);
+      }
     }
   }, [autoConnectAttempted, wallet, connected]);
 
@@ -210,30 +204,20 @@ const WalletContextProvider: React.FC<WalletContextProviderProps> = ({ children 
     }
   }, [connected, publicKey, wallet]);
 
-  // Fallback auto-connect mechanism
+  // Monitor for failed auto-connect attempts (without circular dependency)
   useEffect(() => {
-    // Only attempt fallback if auto-connect was attempted but failed
+    // Only log failed auto-connect attempts for debugging
     if (autoConnectAttempted && !connected && !connecting) {
       const storedWalletName = safeGetWalletStorage('walletName');
       const wasConnected = safeGetWalletStorage('walletConnected') === 'true';
       const autoConnectEnabled = safeGetWalletStorage('solana-wallet-adapter-auto-connect') !== 'false';
 
       if (storedWalletName && wasConnected && autoConnectEnabled) {
-        // Wait a bit for wallet adapter to settle, then try manual connection
-        const fallbackTimer = setTimeout(() => {
-          if (!connected && !connecting) {
-            console.log('🔄 Attempting fallback auto-connect to:', storedWalletName);
-            // This will trigger the wallet selection modal if needed
-            connect().catch(error => {
-              console.warn('Fallback auto-connect failed:', error);
-            });
-          }
-        }, 2000); // Wait 2 seconds before fallback attempt
-
-        return () => clearTimeout(fallbackTimer);
+        console.log('⚠️ Auto-connect may have failed for wallet:', storedWalletName);
+        console.log('💡 User can manually reconnect using the Connect Wallet button');
       }
     }
-  }, [autoConnectAttempted, connected, connecting, connect]);
+  }, [autoConnectAttempted, connected, connecting]);
 
   // Handle wallet connection to WebSocket
   useEffect(() => {
