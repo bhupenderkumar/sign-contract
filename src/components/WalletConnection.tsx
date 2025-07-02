@@ -16,11 +16,24 @@ export const WalletConnection: React.FC = () => {
   const [isConnecting, setIsConnecting] = useState(false);
   const [showAutoConnectInfo, setShowAutoConnectInfo] = useState(false);
 
-  // Check if user has previously connected a wallet
+  // Check if user has previously connected a wallet and show helpful info
   React.useEffect(() => {
     const storedWalletName = localStorage.getItem('walletName');
     const wasConnected = localStorage.getItem('walletConnected') === 'true';
-    setShowAutoConnectInfo(storedWalletName && wasConnected && !connected);
+    const autoConnectEnabled = localStorage.getItem('solana-wallet-adapter-auto-connect') !== 'false';
+
+    // Show info if wallet should auto-connect but hasn't yet
+    setShowAutoConnectInfo(storedWalletName && wasConnected && autoConnectEnabled && !connected);
+
+    // Log wallet persistence status for debugging
+    if (storedWalletName && wasConnected) {
+      console.log('💾 Found stored wallet connection:', {
+        walletName: storedWalletName,
+        wasConnected,
+        autoConnectEnabled,
+        currentlyConnected: connected
+      });
+    }
   }, [connected]);
 
   const handleConnect = async () => {

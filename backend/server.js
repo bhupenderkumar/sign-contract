@@ -31,8 +31,26 @@ const {
   networkMiddleware
 } = require('./config/environment');
 
-// Load the IDL
-const idl = require("/home/bhupek/digitalcontract/sign-contract/solana-contract/digital_contract/target/idl/digital_contract.json");
+// Load the IDL with proper path resolution
+const path = require('path');
+const idlPath = path.join(__dirname, '..', 'digital_contract', 'target', 'idl', 'digital_contract.json');
+
+let idl;
+try {
+  idl = require(idlPath);
+  console.log('✅ IDL loaded successfully from:', idlPath);
+} catch (error) {
+  console.warn('⚠️ IDL not found at:', idlPath);
+  console.warn('⚠️ Contract functionality will be limited without IDL');
+  // Create a minimal IDL structure to prevent crashes
+  idl = {
+    version: "0.1.0",
+    name: "digital_contract",
+    instructions: [],
+    accounts: [],
+    types: []
+  };
+}
 
 // Initialize Express app
 const app = express();
@@ -81,7 +99,12 @@ console.log(`🌐 RPC Endpoint: ${networkConfig.rpcUrl}`);
 // Solana Program ID (Deployed to Devnet)
 const programId = new PublicKey("4bmYTgHAoYfBBwoELVqUzc9n8DTfFvtt7CodYq78wzir");
 
-// Configure the client to use the local cluster.
+// Configure the client to use the local cluster with proper wallet path
+const walletPath = path.join(__dirname, 'wallet.json');
+process.env.ANCHOR_WALLET = walletPath;
+
+console.log('🔧 Setting ANCHOR_WALLET to:', walletPath);
+
 anchor.setProvider(anchor.AnchorProvider.env());
 const program = new anchor.Program(idl, programId);
 

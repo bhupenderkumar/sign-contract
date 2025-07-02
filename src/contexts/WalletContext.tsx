@@ -133,7 +133,7 @@ const WalletContextProvider: React.FC<WalletContextProviderProps> = ({ children 
     };
   }, []);
 
-  // Enhanced auto-connect logic with wallet selection
+  // Enhanced auto-connect logic with active connection attempt
   useEffect(() => {
     if (!autoConnectAttempted) {
       const storedWalletName = safeGetWalletStorage('walletName');
@@ -145,17 +145,38 @@ const WalletContextProvider: React.FC<WalletContextProviderProps> = ({ children 
         wasConnected,
         autoConnectEnabled,
         currentWallet: wallet?.adapter?.name,
-        connected
+        connected,
+        connecting
       });
 
-      // Mark as attempted after initial check
-      setAutoConnectAttempted(true);
+      if (storedWalletName && wasConnected && autoConnectEnabled && !connected && !connecting) {
+        // If wallet adapter auto-connect didn't work, try manual connection
+        if (wallet && wallet.adapter.name === storedWalletName) {
+          console.log('🔄 Attempting manual auto-connect to:', storedWalletName);
 
-      if (storedWalletName && wasConnected && autoConnectEnabled && !connected) {
-        console.log('✅ Auto-connect should be handled by WalletProvider for:', storedWalletName);
+          // Use a small delay to ensure wallet adapter is fully initialized
+          const autoConnectTimer = setTimeout(async () => {
+            try {
+              await solanaConnect();
+              console.log('✅ Manual auto-connect successful');
+            } catch (error) {
+              console.warn('Manual auto-connect failed:', error);
+              // Don't clear the stored connection - user can still manually connect
+            }
+          }, 1000);
+
+          setAutoConnectAttempted(true);
+          return () => clearTimeout(autoConnectTimer);
+        } else {
+          console.log('⏳ Waiting for correct wallet to be selected:', storedWalletName);
+          // Don't mark as attempted yet, wait for the right wallet
+          return;
+        }
       }
+
+      setAutoConnectAttempted(true);
     }
-  }, [autoConnectAttempted, wallet, connected]);
+  }, [autoConnectAttempted, wallet, connected, connecting, solanaConnect]);
 
   // Handle successful connection (both manual and auto)
   useEffect(() => {
@@ -403,7 +424,7 @@ export const WalletProviderWrapper: React.FC<WalletProviderProps> = ({ children 
     return networkConfig.rpcUrl;
   };
 
-  // Check if auto-connect should be enabled
+  // Check if auto-connect should be enabled and ensure wallet is properly selected
   const shouldAutoConnect = () => {
     try {
       const wasConnected = localStorage.getItem('walletConnected') === 'true';
@@ -411,6 +432,16 @@ export const WalletProviderWrapper: React.FC<WalletProviderProps> = ({ children 
       const autoConnectEnabled = localStorage.getItem('solana-wallet-adapter-auto-connect') !== 'false';
 
       console.log('🔍 Auto-connect check:', { wasConnected, walletName, autoConnectEnabled });
+
+      // Set the wallet name in the standard location for wallet adapter
+      if (wasConnected && walletName && autoConnectEnabled) {
+        try {
+          localStorage.setItem('solana-wallet-adapter-wallet-name', walletName);
+          console.log('🔧 Set wallet adapter wallet name:', walletName);
+        } catch (error) {
+          console.warn('Error setting wallet adapter wallet name:', error);
+        }
+      }
 
       return wasConnected && walletName && autoConnectEnabled;
     } catch (error) {
