@@ -28,20 +28,40 @@ class SolanaContractService {
         hasSigned: false
       }));
 
-      // Create the contract on-chain
+      // Prepare document hash (combine contract data into a hash)
+      const documentData = {
+        contractId: contractData.contractId,
+        title: contractData.title,
+        description: contractData.description,
+        agreementText: contractData.agreementText,
+        structuredClauses: contractData.structuredClauses || [],
+        parties: contractData.parties,
+        useMediator: contractData.useMediator || false,
+        mediator: contractData.mediator
+      };
+      const documentHash = require('crypto').createHash('sha256').update(JSON.stringify(documentData)).digest('hex');
+
+      // Prepare parties as public keys only
+      const partyPublicKeys = parties.map(party => party.publicKey);
+
+      // Prepare mediator public key
+      const mediatorPubkey = contractData.useMediator && contractData.mediator
+        ? new PublicKey(contractData.mediator.publicKey || parties[0].publicKey) // Fallback to first party if no mediator pubkey
+        : null;
+
+      // Prepare expiry timestamp
+      const expiryTimestamp = contractData.expiryDate
+        ? Math.floor(contractData.expiryDate.getTime() / 1000)
+        : null;
+
+      // Create the contract on-chain with correct parameters
       const tx = await this.program.methods
         .createContract(
-          contractData.contractId,
+          documentHash,
           contractData.title,
-          contractData.description,
-          contractData.agreementText,
-          contractData.structuredClauses || [],
-          parties,
-          contractData.useMediator || false,
-          contractData.mediator ? contractData.mediator.name : "",
-          contractData.mediator ? contractData.mediator.email : "",
-          contractData.expiryDate ? new anchor.BN(contractData.expiryDate.getTime() / 1000) : new anchor.BN(0),
-          new anchor.BN(platformFee)
+          partyPublicKeys,
+          mediatorPubkey,
+          expiryTimestamp
         )
         .accounts({
           contract: contractAccount.publicKey,

@@ -26,7 +26,8 @@ import {
   Download,
   MessageSquare,
   Flag,
-  Send
+  Send,
+  RefreshCw
 } from "lucide-react";
 
 interface ContractDetails {
@@ -59,6 +60,16 @@ interface ContractDetails {
     timestamp: string;
     details: any;
   }>;
+  blockchainInfo?: {
+    network: string;
+    programId: string;
+    contractAddress?: string;
+    transactionId?: string;
+    explorerUrl?: string;
+    contractExplorerUrl?: string;
+    programExplorerUrl?: string;
+    isBlockchainContract: boolean;
+  };
 }
 
 const ContractDetails = () => {
@@ -78,6 +89,7 @@ const ContractDetails = () => {
     evidence: ''
   });
   const [submittingDispute, setSubmittingDispute] = useState(false);
+  const [isSyncingBlockchain, setIsSyncingBlockchain] = useState(false);
 
   useEffect(() => {
     if (id) {
@@ -345,6 +357,58 @@ const ContractDetails = () => {
     return party?.name || 'Unknown';
   };
 
+  const handleSyncBlockchainStatus = async () => {
+    if (!contract?.blockchainInfo?.isBlockchainContract) {
+      toast({
+        title: "Not a Blockchain Contract",
+        description: "This contract is not deployed on the blockchain.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsSyncingBlockchain(true);
+    try {
+      const response = await fetch(`http://localhost:3001/api/contracts/${id}/sync-blockchain-status`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        if (result.updated) {
+          toast({
+            title: "Blockchain Status Updated",
+            description: `Found ${result.updates.length} updates from blockchain: ${result.updates.join(', ')}`,
+            variant: "default",
+          });
+          // Refresh contract data to show updates
+          fetchContract();
+        } else {
+          toast({
+            title: "No Updates Found",
+            description: "Contract is already up to date with blockchain status.",
+            variant: "default",
+          });
+        }
+      } else {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to sync blockchain status');
+      }
+    } catch (error) {
+      console.error('Error syncing blockchain status:', error);
+      toast({
+        title: "Sync Error",
+        description: error.message || "Failed to sync with blockchain. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSyncingBlockchain(false);
+    }
+  };
+
   const canRaiseDispute = () => {
     if (!contract || !connected || !publicKey) return false;
 
@@ -425,9 +489,17 @@ const ContractDetails = () => {
           </div>
           
           <div className="text-right">
-            <Badge className={`${getStatusColor(contract.status)} mb-2`}>
-              {getStatusText(contract.status)}
-            </Badge>
+            <div className="flex items-center justify-end gap-2 mb-2">
+              <Badge className={`${getStatusColor(contract.status)}`}>
+                {getStatusText(contract.status)}
+              </Badge>
+              {contract.blockchainInfo?.isBlockchainContract && (
+                <Badge className="bg-blue-600/20 text-blue-300 border-blue-600/30">
+                  <Shield className="h-3 w-3 mr-1" />
+                  Blockchain
+                </Badge>
+              )}
+            </div>
             <div className="flex items-center justify-end gap-2 text-slate-400 text-sm mb-2">
               <span>ID: {contract.contractId}</span>
               <Button
@@ -524,6 +596,10 @@ const ContractDetails = () => {
               <Users className="h-4 w-4 mr-2" />
               Parties & Signatures
             </TabsTrigger>
+            <TabsTrigger value="blockchain" className="data-[state=active]:bg-slate-700">
+              <Shield className="h-4 w-4 mr-2" />
+              Blockchain
+            </TabsTrigger>
             <TabsTrigger value="timeline" className="data-[state=active]:bg-slate-700">
               <Clock className="h-4 w-4 mr-2" />
               Timeline
@@ -616,36 +692,362 @@ const ContractDetails = () => {
           <TabsContent value="timeline" className="space-y-6">
             <Card className="bg-slate-800 border-slate-700">
               <CardHeader>
-                <CardTitle className="text-white">Contract Timeline</CardTitle>
+                <CardTitle className="text-white flex items-center">
+                  <Clock className="h-5 w-5 mr-2 text-blue-400" />
+                  Contract Timeline & Audit Log
+                </CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
                   {contract.auditLog && contract.auditLog.length > 0 ? (
-                    contract.auditLog.map((entry, index) => (
-                      <div key={index} className="flex items-start space-x-3 p-3 bg-slate-700 rounded-lg">
-                        <div className="flex-shrink-0 w-2 h-2 bg-blue-500 rounded-full mt-2"></div>
-                        <div className="flex-1">
-                          <p className="text-white font-medium">{entry.action?.replace(/_/g, ' ').toUpperCase() || 'Unknown Action'}</p>
-                          <p className="text-slate-400 text-sm">By: {entry.performedBy || 'Unknown'}</p>
-                          <p className="text-slate-500 text-xs">{entry.timestamp ? new Date(entry.timestamp).toLocaleString() : 'Unknown time'}</p>
-                          {entry.details && Object.keys(entry.details).length > 0 && (
-                            <div className="mt-2 text-xs text-slate-400">
-                              <pre>{JSON.stringify(entry.details, null, 2)}</pre>
+                    <div className="relative">
+                      {/* Timeline line */}
+                      <div className="absolute left-4 top-0 bottom-0 w-0.5 bg-slate-600"></div>
+
+                      {contract.auditLog.map((entry, index) => {
+                        const getActionIcon = (action: string) => {
+                          if (action.includes('created')) return <FileText className="h-4 w-4 text-green-400" />;
+                          if (action.includes('signed')) return <CheckCircle className="h-4 w-4 text-blue-400" />;
+                          if (action.includes('blockchain') || action.includes('onchain')) return <Shield className="h-4 w-4 text-purple-400" />;
+                          if (action.includes('dispute')) return <AlertCircle className="h-4 w-4 text-red-400" />;
+                          return <Clock className="h-4 w-4 text-slate-400" />;
+                        };
+
+                        const getActionColor = (action: string) => {
+                          if (action.includes('created')) return 'border-green-400 bg-green-400/10';
+                          if (action.includes('signed')) return 'border-blue-400 bg-blue-400/10';
+                          if (action.includes('blockchain') || action.includes('onchain')) return 'border-purple-400 bg-purple-400/10';
+                          if (action.includes('dispute')) return 'border-red-400 bg-red-400/10';
+                          return 'border-slate-400 bg-slate-400/10';
+                        };
+
+                        const formatActionTitle = (action: string) => {
+                          const actionMap: { [key: string]: string } = {
+                            'contract_created': 'Contract Created',
+                            'contract_created_onchain': 'Contract Deployed to Blockchain',
+                            'contract_signed': 'Contract Signed',
+                            'contract_signed_onchain': 'Contract Signed on Blockchain',
+                            'dispute_raised': 'Dispute Raised',
+                            'dispute_resolved': 'Dispute Resolved',
+                            'contract_completed': 'Contract Completed'
+                          };
+                          return actionMap[action] || action?.replace(/_/g, ' ').toUpperCase() || 'Unknown Action';
+                        };
+
+                        return (
+                          <div key={index} className="relative flex items-start space-x-4 pb-6">
+                            {/* Timeline dot */}
+                            <div className={`relative z-10 flex items-center justify-center w-8 h-8 rounded-full border-2 ${getActionColor(entry.action)}`}>
+                              {getActionIcon(entry.action)}
                             </div>
-                          )}
-                        </div>
-                      </div>
-                    ))
+
+                            {/* Content */}
+                            <div className="flex-1 min-w-0">
+                              <div className="bg-slate-700/50 rounded-lg p-4 border border-slate-600">
+                                <div className="flex items-start justify-between">
+                                  <div className="flex-1">
+                                    <h4 className="text-white font-semibold text-sm">
+                                      {formatActionTitle(entry.action)}
+                                    </h4>
+                                    <p className="text-slate-400 text-sm mt-1">
+                                      Performed by: <span className="text-slate-300">{entry.performedBy || 'System'}</span>
+                                    </p>
+                                    <p className="text-slate-500 text-xs mt-1">
+                                      {entry.timestamp ? new Date(entry.timestamp).toLocaleString() : 'Unknown time'}
+                                    </p>
+                                  </div>
+                                </div>
+
+                                {/* Action details */}
+                                {entry.details && Object.keys(entry.details).length > 0 && (
+                                  <div className="mt-3 pt-3 border-t border-slate-600">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+                                      {Object.entries(entry.details).map(([key, value]) => (
+                                        <div key={key} className="flex justify-between">
+                                          <span className="text-slate-400 capitalize">{key.replace(/_/g, ' ')}:</span>
+                                          <span className="text-slate-300 font-mono">
+                                            {typeof value === 'string' && value.length > 20
+                                              ? `${value.substring(0, 20)}...`
+                                              : String(value)
+                                            }
+                                          </span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
                   ) : (
-                    <div className="text-center py-8">
-                      <Clock className="h-12 w-12 text-slate-500 mx-auto mb-4" />
-                      <p className="text-slate-400">No timeline events available</p>
+                    <div className="text-center py-12">
+                      <Clock className="h-16 w-16 text-slate-500 mx-auto mb-4" />
+                      <h3 className="text-lg font-medium text-slate-300 mb-2">No Timeline Events</h3>
+                      <p className="text-slate-400">Contract events and signatures will appear here as they happen.</p>
                     </div>
                   )}
                 </div>
               </CardContent>
             </Card>
           </TabsContent>
+
+          <TabsContent value="blockchain" className="space-y-6">
+              <Card className="bg-slate-800 border-slate-700">
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-white flex items-center">
+                      <Shield className="h-5 w-5 mr-2 text-blue-400" />
+                      Blockchain Information
+                    </CardTitle>
+                    {contract.blockchainInfo?.isBlockchainContract && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleSyncBlockchainStatus}
+                        disabled={isSyncingBlockchain}
+                        className="bg-blue-600/20 border-blue-600/30 text-blue-300 hover:bg-blue-600/30"
+                      >
+                        {isSyncingBlockchain ? (
+                          <>
+                            <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-300 mr-2"></div>
+                            Syncing...
+                          </>
+                        ) : (
+                          <>
+                            <RefreshCw className="h-3 w-3 mr-2" />
+                            Sync from Blockchain
+                          </>
+                        )}
+                      </Button>
+                    )}
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  {contract.blockchainInfo?.isBlockchainContract ? (
+                    <>
+                      {/* Network Information */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="space-y-4">
+                      <div>
+                        <Label className="text-slate-400 text-sm">Network</Label>
+                        <div className="flex items-center mt-1">
+                          <Badge className="bg-blue-600/20 text-blue-300 border-blue-600/30">
+                            Solana {contract.blockchainInfo.network}
+                          </Badge>
+                        </div>
+                      </div>
+
+                      <div>
+                        <Label className="text-slate-400 text-sm">Program ID</Label>
+                        <div className="flex items-center mt-1 space-x-2">
+                          <code className="bg-slate-700 px-3 py-2 rounded text-green-400 text-sm font-mono flex-1">
+                            {contract.blockchainInfo.programId}
+                          </code>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              navigator.clipboard.writeText(contract.blockchainInfo.programId);
+                              toast({
+                                title: "Copied!",
+                                description: "Program ID copied to clipboard",
+                                variant: "default",
+                              });
+                            }}
+                            className="h-8 w-8 p-0"
+                          >
+                            <Copy className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      </div>
+
+                      {contract.blockchainInfo.contractAddress && (
+                        <div>
+                          <Label className="text-slate-400 text-sm">Contract Address</Label>
+                          <div className="flex items-center mt-1 space-x-2">
+                            <code className="bg-slate-700 px-3 py-2 rounded text-green-400 text-sm font-mono flex-1">
+                              {contract.blockchainInfo.contractAddress}
+                            </code>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                navigator.clipboard.writeText(contract.blockchainInfo.contractAddress);
+                                toast({
+                                  title: "Copied!",
+                                  description: "Contract address copied to clipboard",
+                                  variant: "default",
+                                });
+                              }}
+                              className="h-8 w-8 p-0"
+                            >
+                              <Copy className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="space-y-4">
+                      {contract.blockchainInfo.transactionId && (
+                        <div>
+                          <Label className="text-slate-400 text-sm">Transaction ID</Label>
+                          <div className="flex items-center mt-1 space-x-2">
+                            <code className="bg-slate-700 px-3 py-2 rounded text-green-400 text-sm font-mono flex-1">
+                              {contract.blockchainInfo.transactionId.length > 20
+                                ? `${contract.blockchainInfo.transactionId.substring(0, 20)}...`
+                                : contract.blockchainInfo.transactionId
+                              }
+                            </code>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                navigator.clipboard.writeText(contract.blockchainInfo.transactionId);
+                                toast({
+                                  title: "Copied!",
+                                  description: "Transaction ID copied to clipboard",
+                                  variant: "default",
+                                });
+                              }}
+                              className="h-8 w-8 p-0"
+                            >
+                              <Copy className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+
+                      <div>
+                        <Label className="text-slate-400 text-sm">Blockchain Explorer</Label>
+                        <div className="mt-1 space-y-2">
+                          {contract.blockchainInfo.explorerUrl && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => window.open(contract.blockchainInfo.explorerUrl, '_blank')}
+                              className="bg-slate-700 border-slate-600 text-slate-300 hover:bg-slate-600 mr-2"
+                            >
+                              <ExternalLink className="h-4 w-4 mr-2" />
+                              View Transaction
+                            </Button>
+                          )}
+                          {contract.blockchainInfo.contractExplorerUrl && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => window.open(contract.blockchainInfo.contractExplorerUrl, '_blank')}
+                              className="bg-slate-700 border-slate-600 text-slate-300 hover:bg-slate-600 mr-2"
+                            >
+                              <ExternalLink className="h-4 w-4 mr-2" />
+                              View Contract
+                            </Button>
+                          )}
+                          {contract.blockchainInfo.programExplorerUrl && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => window.open(contract.blockchainInfo.programExplorerUrl, '_blank')}
+                              className="bg-slate-700 border-slate-600 text-slate-300 hover:bg-slate-600"
+                            >
+                              <ExternalLink className="h-4 w-4 mr-2" />
+                              View Program
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Validation Information */}
+                  <div className="border-t border-slate-700 pt-6">
+                    <h4 className="text-lg font-semibold text-white mb-4">Validation Information</h4>
+                    <div className="bg-slate-700/50 rounded-lg p-4 space-y-3">
+                      <div className="flex items-center text-green-400">
+                        <CheckCircle className="h-5 w-5 mr-2" />
+                        <span className="font-medium">Contract deployed on Solana blockchain</span>
+                      </div>
+                      <div className="flex items-center text-green-400">
+                        <CheckCircle className="h-5 w-5 mr-2" />
+                        <span className="font-medium">Immutable and tamper-proof</span>
+                      </div>
+                      <div className="flex items-center text-green-400">
+                        <CheckCircle className="h-5 w-5 mr-2" />
+                        <span className="font-medium">Cryptographically secured</span>
+                      </div>
+                      <div className="text-slate-400 text-sm mt-3">
+                        You can verify this contract on the Solana {contract.blockchainInfo.network} network using the Program ID above.
+                        All transactions and signatures are permanently recorded on the blockchain.
+                      </div>
+                    </div>
+                  </div>
+                    </>
+                  ) : (
+                    /* Non-Blockchain Contract Information */
+                    <div className="text-center py-12">
+                      <div className="inline-flex items-center justify-center w-16 h-16 bg-slate-700 rounded-full mb-4">
+                        <Shield className="h-8 w-8 text-slate-400" />
+                      </div>
+                      <h3 className="text-lg font-medium text-slate-300 mb-2">Regular Contract</h3>
+                      <p className="text-slate-400 mb-6">
+                        This contract is stored in our database but not deployed on the blockchain.
+                      </p>
+
+                      {/* Show Program ID for reference */}
+                      <div className="bg-slate-700/50 rounded-lg p-4 mb-6">
+                        <h4 className="text-sm font-medium text-slate-300 mb-2">Available Blockchain Program</h4>
+                        <div className="flex items-center justify-center space-x-2">
+                          <code className="bg-slate-700 px-3 py-2 rounded text-green-400 text-sm font-mono">
+                            {contract.blockchainInfo?.programId || 'Program ID not available'}
+                          </code>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              if (contract.blockchainInfo?.programId) {
+                                navigator.clipboard.writeText(contract.blockchainInfo.programId);
+                                toast({
+                                  title: "Copied!",
+                                  description: "Program ID copied to clipboard",
+                                  variant: "default",
+                                });
+                              }
+                            }}
+                            className="h-8 w-8 p-0"
+                          >
+                            <Copy className="h-3 w-3" />
+                          </Button>
+                        </div>
+                        <p className="text-xs text-slate-500 mt-2">
+                          Solana {contract.blockchainInfo?.network || 'devnet'} Program ID
+                        </p>
+                      </div>
+
+                      <div className="text-left bg-slate-700/30 rounded-lg p-4">
+                        <h4 className="text-sm font-medium text-slate-300 mb-3">To deploy this contract on blockchain:</h4>
+                        <ol className="text-sm text-slate-400 space-y-2">
+                          <li className="flex items-start">
+                            <span className="bg-blue-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs mr-2 mt-0.5">1</span>
+                            Create a new contract with "Deploy to Solana Blockchain" enabled
+                          </li>
+                          <li className="flex items-start">
+                            <span className="bg-blue-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs mr-2 mt-0.5">2</span>
+                            Connect your wallet during contract creation
+                          </li>
+                          <li className="flex items-start">
+                            <span className="bg-blue-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs mr-2 mt-0.5">3</span>
+                            Complete the blockchain deployment process
+                          </li>
+                        </ol>
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
         </Tabs>
       </div>
 

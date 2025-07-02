@@ -1,9 +1,11 @@
 use anchor_lang::prelude::*;
 use anchor_lang::system_program;
 
-declare_id!("Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS");
+declare_id!("4bmYTgHAoYfBBwoELVqUzc9n8DTfFvtt7CodYq78wzir");
 
-const PLATFORM_FEE_LAMPORTS: u64 = 10_000_000; // 0.01 SOL in lamports (1 SOL = 1,000,000,000 lamports)
+const PLATFORM_FEE_BASIS_POINTS: u64 = 10; // 0.1% = 10 basis points (1 basis point = 0.01%)
+const MIN_PLATFORM_FEE_LAMPORTS: u64 = 1_000_000; // Minimum 0.001 SOL
+const MAX_PLATFORM_FEE_LAMPORTS: u64 = 100_000_000; // Maximum 0.1 SOL
 const MAX_PARTIES: usize = 10; // Maximum number of parties in a contract
 const MAX_DOCUMENT_HASH_LENGTH: usize = 64; // Maximum length for document hash
 const MAX_TITLE_LENGTH: usize = 100; // Maximum length for contract title
@@ -19,6 +21,7 @@ pub mod digital_contract {
         parties: Vec<Pubkey>,
         mediator: Option<Pubkey>,
         expiry_timestamp: Option<i64>,
+        contract_value_lamports: u64, // Value of the contract in lamports
     ) -> Result<()> {
         require!(
             document_hash.len() <= MAX_DOCUMENT_HASH_LENGTH,
@@ -44,8 +47,17 @@ pub mod digital_contract {
         contract.created_at = Clock::get()?.unix_timestamp;
         contract.expiry_timestamp = expiry_timestamp;
         contract.is_fully_signed = false;
+        contract.party2_fee_paid = false;
 
-        // Transfer platform fee
+        // Calculate platform fee (0.1% of contract value)
+        let platform_fee = (contract_value_lamports * PLATFORM_FEE_BASIS_POINTS) / 10_000;
+        let platform_fee = platform_fee.max(MIN_PLATFORM_FEE_LAMPORTS).min(MAX_PLATFORM_FEE_LAMPORTS);
+
+        // Store contract value and platform fee
+        contract.contract_value_lamports = contract_value_lamports;
+        contract.platform_fee_lamports = platform_fee;
+
+        // Transfer platform fee from creator (Party 1)
         let cpi_context = CpiContext::new(
             ctx.accounts.system_program.to_account_info(),
             system_program::Transfer {
@@ -53,7 +65,7 @@ pub mod digital_contract {
                 to: ctx.accounts.platform_fee_recipient.to_account_info(),
             },
         );
-        system_program::transfer(cpi_context, PLATFORM_FEE_LAMPORTS)?;
+        system_program::transfer(cpi_context, platform_fee)?;
 
         emit!(ContractCreated {
             contract_id: contract.key(),
@@ -93,6 +105,24 @@ pub mod digital_contract {
             !contract.signatures[party_index],
             ContractError::AlreadySigned
         );
+
+        // If this is Party 2 (index 1) and they haven't paid their platform fee yet
+        if party_index == 1 && !contract.party2_fee_paid {
+            // Calculate platform fee for Party 2 (same as Party 1)
+            let platform_fee = contract.platform_fee_lamports;
+
+            // Transfer platform fee from Party 2
+            let cpi_context = CpiContext::new(
+                ctx.accounts.system_program.to_account_info(),
+                system_program::Transfer {
+                    from: ctx.accounts.signer.to_account_info(),
+                    to: ctx.accounts.platform_fee_recipient.to_account_info(),
+                },
+            );
+            system_program::transfer(cpi_context, platform_fee)?;
+
+            contract.party2_fee_paid = true;
+        }
 
         // Mark as signed
         contract.signatures[party_index] = true;
@@ -181,7 +211,10 @@ pub struct CreateContract<'info> {
                 1 + // status
                 8 + // created_at
                 1 + 8 + // expiry_timestamp (Option<i64>)
-                1 // is_fully_signed
+                1 + // is_fully_signed
+                8 + // contract_value_lamports
+                8 + // platform_fee_lamports
+                1 // party2_fee_paid
     )]
     pub contract: Account<'info, Contract>,
     #[account(mut)]
@@ -196,7 +229,12 @@ pub struct CreateContract<'info> {
 pub struct SignContract<'info> {
     #[account(mut)]
     pub contract: Account<'info, Contract>,
+    #[account(mut)]
     pub signer: Signer<'info>,
+    /// CHECK: This is the platform fee recipient, no constraints needed beyond being a valid account.
+    #[account(mut)]
+    pub platform_fee_recipient: AccountInfo<'info>,
+    pub system_program: Program<'info, System>,
 }
 
 #[derive(Accounts)]
@@ -225,6 +263,9 @@ pub struct Contract {
     pub created_at: i64,
     pub expiry_timestamp: Option<i64>,
     pub is_fully_signed: bool,
+    pub contract_value_lamports: u64,
+    pub platform_fee_lamports: u64,
+    pub party2_fee_paid: bool,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, PartialEq, Eq)]

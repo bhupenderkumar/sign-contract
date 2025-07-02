@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { Button } from "@/components/ui/button";
 import { useWallet } from '@/contexts/WalletContext';
 import { useNetwork } from '@/contexts/NetworkContext';
+import { useToast } from '@/components/ui/use-toast';
 import { NetworkSelector } from '@/components/NetworkSelector';
 import { EnvironmentValidator } from '@/components/EnvironmentValidator';
 import {
@@ -22,6 +23,7 @@ const Navigation = () => {
   const location = useLocation();
   const { connected, publicKey, connect, disconnect } = useWallet();
   const { currentNetwork, networkConfig } = useNetwork();
+  const { toast } = useToast();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const navigationItems = [
@@ -38,11 +40,48 @@ const Navigation = () => {
     return location.pathname.startsWith(path);
   };
 
-  const handleWalletAction = () => {
+  const handleWalletAction = async () => {
     if (connected) {
-      disconnect();
+      try {
+        await disconnect();
+      } catch (error) {
+        console.error('Disconnect error:', error);
+        toast({
+          title: "Disconnect Failed",
+          description: "Failed to disconnect wallet. Please try again.",
+          variant: "destructive",
+        });
+      }
     } else {
-      connect();
+      try {
+        await connect();
+      } catch (error) {
+        console.error('Connect error:', error);
+
+        // Handle specific wallet errors
+        if (error.name === 'WalletNotReadyError') {
+          toast({
+            title: "Wallet Not Ready",
+            description: "Please make sure your wallet is installed and unlocked, then try again.",
+            variant: "destructive",
+          });
+        } else if (error.name === 'WalletNotSelectedError') {
+          // Don't show error for wallet selection modal
+          return;
+        } else if (error.message?.includes('User rejected')) {
+          toast({
+            title: "Connection Cancelled",
+            description: "Wallet connection was cancelled by user.",
+            variant: "default",
+          });
+        } else {
+          toast({
+            title: "Connection Failed",
+            description: "Failed to connect wallet. Please try again.",
+            variant: "destructive",
+          });
+        }
+      }
     }
   };
 

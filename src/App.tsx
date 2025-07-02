@@ -10,8 +10,6 @@ import { NetworkProvider } from "@/contexts/NetworkContext";
 
 import BackendStatus from "./components/BackendStatus";
 import Navigation from "./components/Navigation";
-import { DevPanel } from "./components/DevPanel";
-import WalletDebug from "./components/WalletDebug";
 import Analytics, { trackPerformance } from "./components/Analytics";
 import ErrorBoundary from "./components/ErrorBoundary";
 import Index from "./pages/Index";
@@ -50,8 +48,6 @@ const App = () => {
                 {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
                 <Route path="*" element={<NotFound />} />
               </Routes>
-              <DevPanel />
-              <WalletDebug />
             </BrowserRouter>
             </TooltipProvider>
           </WalletProviderWrapper>

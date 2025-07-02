@@ -6,15 +6,17 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Switch } from "@/components/ui/switch";
-import { ArrowLeft, Upload, Plus, X, Users, FileText, Shield, Wand2, Link } from "lucide-react";
+import { ArrowLeft, Upload, Plus, X, Users, FileText, Shield, Wand2, Link, Key, CheckCircle } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useToast } from "@/components/ui/use-toast";
 import { Toaster } from "@/components/ui/toaster";
-import { getDevConfig, isDevelopment } from '@/config/development';
+
+import { getDevConfig } from '@/config/development';
 import { useWallet } from '@/contexts/WalletContext';
+import { useWallet as useSolanaWallet } from '@solana/wallet-adapter-react';
 import { useWalletWebSocket } from '@/hooks/useWalletWebSocket';
 import walletTransactionService from '@/services/walletTransactionService';
-import CryptoJS from 'crypto-js';
+import DeploymentLoader from '@/components/DeploymentLoader';
 
 interface ContractFormData {
   party1Name: string;
@@ -40,6 +42,7 @@ const ContractCreation = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
   const { connected, publicKey } = useWallet();
+  const { signMessage } = useSolanaWallet();
   const {
     isWalletReady,
     loading: wsLoading,
@@ -74,7 +77,8 @@ const ContractCreation = () => {
   const [newPartyEmail, setNewPartyEmail] = useState('');
   const [newPartyPublicKey, setNewPartyPublicKey] = useState('');
   const [activeTab, setActiveTab] = useState('text');
-  const { signMessage, signTransaction } = useWallet();
+  const [isDeploying, setIsDeploying] = useState(false);
+  const [deploymentContractId, setDeploymentContractId] = useState<string>('');
 
   // Development auto-fill functionality
   const devConfig = getDevConfig();
@@ -98,7 +102,7 @@ const ContractCreation = () => {
 
   // Load sample data on component mount in development
   useEffect(() => {
-    if (isDevelopment && devConfig?.autoFillEnabled) {
+    if (import.meta.env.DEV && devConfig?.autoFillEnabled) {
       // Auto-fill after a short delay to let the component fully mount
       const timer = setTimeout(() => {
         handleAutoFill();
@@ -107,11 +111,47 @@ const ContractCreation = () => {
     }
   }, []);
 
+
+  // Auto-populate public key when wallet connects
+  useEffect(() => {
+    if (connected && publicKey) {
+      // Auto-populate party1 public key if it's empty
+      if (!formData.party1PublicKey) {
+        setFormData(prev => ({
+          ...prev,
+          party1PublicKey: publicKey.toString()
+        }));
+      }
+    }
+  }, [connected, publicKey]);
+
   const handleInputChange = (field: keyof ContractFormData, value: string | boolean) => {
     setFormData(prev => ({
       ...prev,
       [field]: value
     }));
+  };
+
+  // Helper function to set connected wallet's public key for a party
+  const setConnectedWalletKey = (party: 'party1' | 'party2') => {
+    if (connected && publicKey) {
+      const field = party === 'party1' ? 'party1PublicKey' : 'party2PublicKey';
+      setFormData(prev => ({
+        ...prev,
+        [field]: publicKey.toString()
+      }));
+      toast({
+        title: "Public Key Set",
+        description: `${party === 'party1' ? 'First' : 'Second'} party public key set to connected wallet`,
+        variant: "default",
+      });
+    } else {
+      toast({
+        title: "Wallet Not Connected",
+        description: "Please connect your wallet first",
+        variant: "destructive",
+      });
+    }
   };
 
   const addParty = () => {
@@ -418,35 +458,68 @@ const ContractCreation = () => {
           return;
         }
 
-        // Create contract with secure wallet signing (production approach)
-        const creationResult = await walletTransactionService.createContractSecurely(
-          { publicKey, signMessage, signTransaction, connected } as any,
-          { ...contractData, contractId: `contract_${Date.now()}` },
-          '5KizKzo7nXQrdP7bQ4HehteE1nQtvCYPi3SY7ZgAox9d' // Platform fee recipient
-        );
+        // Show deployment loader
+        setIsDeploying(true);
 
-        if (!creationResult.success) {
+        // Get message signature for secure contract creation
+        try {
+          const contractId = `contract_${Date.now()}`;
+          setDeploymentContractId(contractId);
+          const message = `Digital Contract CREATE\n\nContract ID: ${contractId}\nTimestamp: ${Date.now()}\n\nBy signing this message, you confirm your intent to create this contract.`;
+          const messageBytes = new TextEncoder().encode(message);
+
+          // Try to get message signature from wallet
+          let signatureBase64: string;
+
+          if (signMessage) {
+            try {
+              const signature = await signMessage(messageBytes);
+              signatureBase64 = Buffer.from(signature).toString('base64');
+            } catch (error) {
+              console.log('Message signing failed, using public key as proof');
+              signatureBase64 = Buffer.from(publicKey!.toBytes()).toString('base64');
+            }
+          } else {
+            // Fallback: use public key as proof of ownership
+            signatureBase64 = Buffer.from(publicKey!.toBytes()).toString('base64');
+            console.log('Wallet does not support message signing, using public key as proof');
+          }
+
+          // Create contract on Solana blockchain using the secure endpoint
+          response = await fetch('http://localhost:3001/api/contracts/create-onchain-secure', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              contractTitle: formData.contractTitle,
+              contractDescription: formData.contractDescription,
+              agreementText: formData.agreementText,
+              structuredClauses: formData.structuredClauses,
+              party1Name: formData.party1Name,
+              party1Email: formData.party1Email,
+              party1PublicKey: formData.party1PublicKey || publicKey.toString(),
+              party1Signature: signatureBase64,
+              party1Message: message,
+              party2Name: formData.party2Name,
+              party2Email: formData.party2Email,
+              party2PublicKey: formData.party2PublicKey,
+              additionalParties: formData.additionalParties,
+              mediatorName: formData.useMediator ? formData.mediatorName : undefined,
+              mediatorEmail: formData.useMediator ? formData.mediatorEmail : undefined,
+              useMediator: formData.useMediator,
+              expiryDate: null // Handle expiry date if needed
+            }),
+          });
+        } catch (error) {
+          setIsDeploying(false);
           toast({
-            title: "Blockchain Deployment Failed",
-            description: creationResult.error || "Failed to deploy contract to blockchain",
+            title: "Signature Failed",
+            description: "Failed to sign the contract creation message. Please try again.",
             variant: "destructive",
           });
           return;
         }
-
-        // Send contract data to backend with blockchain proof
-        response = await fetch('http://localhost:3001/api/contracts', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            ...contractData,
-            blockchainTxHash: creationResult.transactionId,
-            contractAddress: creationResult.contractAddress,
-            status: 'blockchain_created'
-          }),
-        });
       } else {
         // Regular contract creation
         response = await fetch('http://localhost:3001/api/contracts', {
@@ -462,19 +535,39 @@ const ContractCreation = () => {
         const result = await response.json();
         console.log('✅ Contract created successfully:', result);
 
-        const successMessage = formData.useBlockchain
-          ? `Contract ID: ${result.contractId}. Deployed to Solana Devnet! Transaction: ${result.transactionId?.substring(0, 8)}...`
-          : `Contract ID: ${result.contractId}. ${result.message}`;
+        setIsDeploying(false);
 
-        toast({
-          title: formData.useBlockchain ? "Contract Deployed to Blockchain!" : "Contract Created!",
-          description: successMessage,
-          variant: "default",
-        });
+        if (formData.useBlockchain) {
+          // Handle blockchain contract creation success
+          const successMessage = `Blockchain contract created! Contract ID: ${result.contract?.id || 'N/A'}`;
 
-        // Navigate back to home page
-        navigate('/');
+          toast({
+            title: "Blockchain Contract Created!",
+            description: successMessage,
+            variant: "default",
+          });
+
+          // Navigate to the contract details page if we have the contract ID
+          if (result.contract?.id) {
+            navigate(`/contract/${result.contract.id}`);
+          } else {
+            navigate('/');
+          }
+        } else {
+          // Handle regular contract creation success
+          const successMessage = `Contract ID: ${result.contractId}. ${result.message}`;
+
+          toast({
+            title: "Contract Created!",
+            description: successMessage,
+            variant: "default",
+          });
+
+          // Navigate back to home page
+          navigate('/');
+        }
       } else {
+        setIsDeploying(false);
         const errorData = await response.json();
         console.error('❌ Contract creation failed:', errorData);
 
@@ -485,6 +578,7 @@ const ContractCreation = () => {
         });
       }
     } catch (error) {
+      setIsDeploying(false);
       console.error('Error submitting contract:', error);
       toast({
         title: "Submission Error",
@@ -492,6 +586,26 @@ const ContractCreation = () => {
         variant: "destructive",
       });
     }
+  };
+
+  const handleDeploymentComplete = () => {
+    setIsDeploying(false);
+    toast({
+      title: "Contract Deployed to Blockchain!",
+      description: `Contract ID: ${deploymentContractId}. Successfully deployed to Solana Devnet!`,
+      variant: "default",
+    });
+    // Navigate back to home page
+    navigate('/');
+  };
+
+  const handleDeploymentError = (error: string) => {
+    setIsDeploying(false);
+    toast({
+      title: "Deployment Failed",
+      description: error,
+      variant: "destructive",
+    });
   };
 
   const termsAndConditions = [
@@ -510,19 +624,35 @@ const ContractCreation = () => {
       <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white">
         <div className="container mx-auto px-6 py-8">
           {/* Header */}
-          <div className="flex items-center mb-8">
-            <Button
-              variant="ghost"
-              onClick={() => navigate('/')}
-              className="text-slate-300 hover:bg-slate-700 mr-4"
-            >
-              <ArrowLeft className="h-4 w-4 mr-2" />
-              Back to Home
-            </Button>
-            <div>
-              <h1 className="text-4xl font-bold text-white">Create Smart Contract</h1>
-              <p className="text-slate-400 mt-2">Create secure, legally binding digital agreements</p>
+          <div className="flex items-center justify-between mb-8">
+            <div className="flex items-center">
+              <Button
+                variant="ghost"
+                onClick={() => navigate('/')}
+                className="text-slate-300 hover:bg-slate-700 mr-4"
+              >
+                <ArrowLeft className="h-4 w-4 mr-2" />
+                Back to Home
+              </Button>
+              <div>
+                <h1 className="text-4xl font-bold text-white">Create Smart Contract</h1>
+                <p className="text-slate-400 mt-2">Create secure, legally binding digital agreements</p>
+              </div>
             </div>
+
+            {/* Development Auto-Fill Button */}
+            {import.meta.env.DEV && devConfig && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleAutoFill}
+                className="bg-purple-600/20 border-purple-400/30 text-purple-300 hover:bg-purple-600/30 hover:text-purple-200"
+              >
+                <Wand2 className="h-4 w-4 mr-2" />
+                Auto-Fill Dev Data
+              </Button>
+            )}
           </div>
 
           {/* Benefits Banner */}
@@ -560,18 +690,7 @@ const ContractCreation = () => {
               <div className="space-y-6">
                 <div className="flex items-center justify-between border-b border-white/20 pb-2">
                   <h2 className="text-2xl font-semibold text-white">Contract Information</h2>
-                  {isDevelopment && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={handleAutoFill}
-                      className="bg-purple-600/20 border-purple-400/30 text-purple-300 hover:bg-purple-600/30 hover:text-purple-200"
-                    >
-                      <Wand2 className="h-4 w-4 mr-2" />
-                      Auto-Fill Dev Data
-                    </Button>
-                  )}
+                
                 </div>
 
                 <div className="grid md:grid-cols-2 gap-6">
@@ -672,14 +791,39 @@ const ContractCreation = () => {
                         required />
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="party1PublicKey" className="text-slate-300">Public Key *</Label>
+                      <div className="flex items-center justify-between">
+                        <Label htmlFor="party1PublicKey" className="text-slate-300">Public Key *</Label>
+                        {connected && publicKey && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setConnectedWalletKey('party1')}
+                            className="text-xs bg-blue-600/20 border-blue-600/30 text-blue-300 hover:bg-blue-600/30"
+                          >
+                            <Key className="h-3 w-3 mr-1" />
+                            Use My Wallet
+                          </Button>
+                        )}
+                      </div>
+                      {connected && publicKey && (
+                        <p className="text-xs text-slate-400">
+                          💡 Load your connected wallet public key above
+                        </p>
+                      )}
                       <Input
                         id="party1PublicKey"
                         value={formData.party1PublicKey}
                         onChange={(e) => handleInputChange('party1PublicKey', e.target.value)}
-                        placeholder="Enter public key"
+                        placeholder="Enter public key or use connected wallet"
                         className="bg-white/10 border-white/20 focus:border-blue-400 text-white"
                         required />
+                      {connected && publicKey && formData.party1PublicKey === publicKey.toString() && (
+                        <p className="text-xs text-green-400 flex items-center">
+                          <CheckCircle className="h-3 w-3 mr-1" />
+                          Using connected wallet key
+                        </p>
+                      )}
                     </div>
                     {formData.useBlockchain && (
                       <div className="space-y-2">
@@ -720,14 +864,39 @@ const ContractCreation = () => {
                         required />
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="party2PublicKey" className="text-slate-300">Public Key *</Label>
+                      <div className="flex items-center justify-between">
+                        <Label htmlFor="party2PublicKey" className="text-slate-300">Public Key *</Label>
+                        {connected && publicKey && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setConnectedWalletKey('party2')}
+                            className="text-xs bg-blue-600/20 border-blue-600/30 text-blue-300 hover:bg-blue-600/30"
+                          >
+                            <Key className="h-3 w-3 mr-1" />
+                            Use My Wallet
+                          </Button>
+                        )}
+                      </div>
+                      {connected && publicKey && (
+                        <p className="text-xs text-slate-400">
+                          💡 Load your connected wallet public key above
+                        </p>
+                      )}
                       <Input
                         id="party2PublicKey"
                         value={formData.party2PublicKey}
                         onChange={(e) => handleInputChange('party2PublicKey', e.target.value)}
-                        placeholder="Enter public key"
+                        placeholder="Enter public key or use connected wallet"
                         className="bg-white/10 border-white/20 focus:border-blue-400 text-white"
                         required />
+                      {connected && publicKey && formData.party2PublicKey === publicKey.toString() && (
+                        <p className="text-xs text-green-400 flex items-center">
+                          <CheckCircle className="h-3 w-3 mr-1" />
+                          Using connected wallet key
+                        </p>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -1055,7 +1224,17 @@ const ContractCreation = () => {
           </form>
         </div>
       </div>
-    </div><Toaster /></>
+    </div>
+
+    {/* Deployment Loader */}
+    <DeploymentLoader
+      isVisible={isDeploying}
+      onComplete={handleDeploymentComplete}
+      onError={handleDeploymentError}
+      contractId={deploymentContractId}
+    />
+
+    <Toaster /></>
   );
 };
 

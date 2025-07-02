@@ -3,11 +3,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Search, FileText, Calendar, Users, Download, Eye, Link, Wallet } from "lucide-react";
+import { Search, FileText, Calendar, Users, Download, Eye, Link } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
 import { Toaster } from "@/components/ui/toaster";
 import { useWallet } from '@/contexts/WalletContext';
-import { getDevConfig, isDevelopment } from '@/config/development';
+
 
 interface Attachment {
   fileName: string;
@@ -45,23 +45,7 @@ export const ContractLookup = () => {
   const [error, setError] = useState('');
   const { toast } = useToast();
   const { publicKey, connected, connect } = useWallet();
-  const devConfig = getDevConfig();
 
-  // Development helper to load sample contract
-  const loadSampleContract = () => {
-    if (!devConfig) return;
-
-    const sampleContract = devConfig.utils.getSampleContractLookup();
-    setContractInfo(sampleContract);
-    setContractId(sampleContract.contractId);
-    setError('');
-
-    toast({
-      title: "Sample Contract Loaded",
-      description: "Development sample contract data has been loaded.",
-      variant: "default",
-    });
-  };
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -338,18 +322,6 @@ export const ContractLookup = () => {
                     </>
                   )}
                 </Button>
-
-                {devConfig && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={loadSampleContract}
-                    className="bg-purple-50 border-purple-200 text-purple-700 hover:bg-purple-100"
-                  >
-                    <Wallet className="h-4 w-4 mr-2" />
-                    Load Sample
-                  </Button>
-                )}
               </div>
             </form>
           </CardContent>

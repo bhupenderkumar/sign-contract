@@ -6,7 +6,11 @@ class SolanaContractService {
   constructor(connection, program, platformFeeRecipient) {
     this.connection = connection;
     this.program = program;
-    this.platformFeeRecipient = platformFeeRecipient;
+    // Use the public key from environment variable if available
+    this.platformFeeRecipient = process.env.PLATFORM_FEE_RECIPIENT_PUBLIC_KEY
+      ? new PublicKey(process.env.PLATFORM_FEE_RECIPIENT_PUBLIC_KEY)
+      : platformFeeRecipient;
+    this.platformFeePercentage = parseFloat(process.env.PLATFORM_FEE_PERCENTAGE || '0.001'); // Default 0.1%
   }
 
   /**
@@ -17,8 +21,16 @@ class SolanaContractService {
       // Generate a unique contract account
       const contractAccount = Keypair.generate();
       
-      // Calculate platform fee (0.01 SOL)
-      const platformFee = 0.01 * LAMPORTS_PER_SOL;
+      // Calculate contract value (default to 0.1 SOL if not provided)
+      const contractValueSOL = contractData.contractValue || 0.1;
+      const contractValueLamports = contractValueSOL * LAMPORTS_PER_SOL;
+
+      // Calculate platform fee (0.1% of contract value)
+      const platformFeeSOL = contractValueSOL * this.platformFeePercentage;
+      const platformFeeLamports = Math.max(
+        Math.min(platformFeeSOL * LAMPORTS_PER_SOL, 100_000_000), // Max 0.1 SOL
+        1_000_000 // Min 0.001 SOL
+      );
       
       // Prepare parties array for the contract
       const parties = contractData.parties.map(party => ({
@@ -28,20 +40,40 @@ class SolanaContractService {
         hasSigned: false
       }));
 
-      // Create the contract on-chain
+      // Prepare document hash (combine contract data into a hash)
+      const documentData = {
+        contractId: contractData.contractId,
+        title: contractData.title,
+        description: contractData.description,
+        agreementText: contractData.agreementText,
+        structuredClauses: contractData.structuredClauses || [],
+        parties: contractData.parties,
+        useMediator: contractData.useMediator || false,
+        mediator: contractData.mediator
+      };
+      const documentHash = require('crypto').createHash('sha256').update(JSON.stringify(documentData)).digest('hex');
+
+      // Prepare parties as public keys only
+      const partyPublicKeys = parties.map(party => party.publicKey);
+
+      // Prepare mediator public key
+      const mediatorPubkey = contractData.useMediator && contractData.mediator
+        ? new PublicKey(contractData.mediator.publicKey || parties[0].publicKey) // Fallback to first party if no mediator pubkey
+        : null;
+
+      // Prepare expiry timestamp
+      const expiryTimestamp = contractData.expiryDate
+        ? Math.floor(contractData.expiryDate.getTime() / 1000)
+        : null;
+
+      // Create the contract on-chain with correct parameters (using old contract structure for now)
       const tx = await this.program.methods
         .createContract(
-          contractData.contractId,
+          documentHash,
           contractData.title,
-          contractData.description,
-          contractData.agreementText,
-          contractData.structuredClauses || [],
-          parties,
-          contractData.useMediator || false,
-          contractData.mediator ? contractData.mediator.name : "",
-          contractData.mediator ? contractData.mediator.email : "",
-          contractData.expiryDate ? new anchor.BN(contractData.expiryDate.getTime() / 1000) : new anchor.BN(0),
-          new anchor.BN(platformFee)
+          partyPublicKeys,
+          mediatorPubkey,
+          expiryTimestamp
         )
         .accounts({
           contract: contractAccount.publicKey,
@@ -56,7 +88,10 @@ class SolanaContractService {
         success: true,
         transactionId: tx,
         contractAddress: contractAccount.publicKey.toString(),
-        platformFee: platformFee / LAMPORTS_PER_SOL
+        platformFee: platformFeeLamports / LAMPORTS_PER_SOL,
+        contractValue: contractValueSOL,
+        party1FeePaid: true,
+        party2FeePaid: false
       };
 
     } catch (error) {
@@ -71,7 +106,8 @@ class SolanaContractService {
   async signContract(contractAddress, signerKeypair) {
     try {
       const contractPubkey = new PublicKey(contractAddress);
-      
+
+      // Use old contract structure for now (without platform fee recipient)
       const tx = await this.program.methods
         .signContract()
         .accounts({
