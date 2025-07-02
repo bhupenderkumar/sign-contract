@@ -133,30 +133,56 @@ const WalletContextProvider: React.FC<WalletContextProviderProps> = ({ children 
     };
   }, []);
 
-  // Monitor wallet adapter auto-connect behavior
+  // Enhanced auto-connect logic with wallet selection
   useEffect(() => {
     if (!autoConnectAttempted) {
-      setAutoConnectAttempted(true);
-
-      // Log the auto-connect attempt
       const storedWalletName = safeGetWalletStorage('walletName');
       const wasConnected = safeGetWalletStorage('walletConnected') === 'true';
+      const autoConnectEnabled = safeGetWalletStorage('solana-wallet-adapter-auto-connect') !== 'false';
 
-      if (storedWalletName && wasConnected) {
-        console.log('🔄 Wallet adapter should auto-connect to:', storedWalletName);
+      console.log('🔄 Auto-connect attempt:', {
+        storedWalletName,
+        wasConnected,
+        autoConnectEnabled,
+        currentWallet: wallet?.adapter?.name,
+        connected
+      });
+
+      if (storedWalletName && wasConnected && autoConnectEnabled && !connected) {
+        // If we have a stored wallet but it's not the current one, we need to wait for wallet selection
+        if (!wallet || wallet.adapter.name !== storedWalletName) {
+          console.log('⏳ Waiting for wallet adapter to initialize with stored wallet:', storedWalletName);
+          // Don't mark as attempted yet, let the wallet adapter handle it
+          return;
+        }
+
+        console.log('🔄 Attempting auto-connect to:', storedWalletName);
       }
-    }
-  }, [autoConnectAttempted]);
 
-  // Handle successful auto-connection
-  useEffect(() => {
-    if (connected && publicKey && wallet && !autoConnectAttempted) {
-      console.log('✅ Auto-connect successful via wallet adapter');
       setAutoConnectAttempted(true);
+    }
+  }, [autoConnectAttempted, wallet, connected]);
+
+  // Handle successful connection (both manual and auto)
+  useEffect(() => {
+    if (connected && publicKey && wallet) {
+      const storedWalletName = safeGetWalletStorage('walletName');
+      const wasAutoConnect = storedWalletName === wallet.adapter.name;
+
+      if (wasAutoConnect) {
+        console.log('✅ Auto-connect successful via wallet adapter:', wallet.adapter.name);
+      } else {
+        console.log('✅ Manual connection successful:', wallet.adapter.name);
+      }
+
+      // Ensure auto-connect attempt is marked as completed
+      if (!autoConnectAttempted) {
+        setAutoConnectAttempted(true);
+      }
     }
   }, [connected, publicKey, wallet, autoConnectAttempted]);
 
-  // Handle wallet connection state changes
+  // Handle wallet connection state changes and persistence
   useEffect(() => {
     if (connected && publicKey && wallet?.adapter?.name) {
       // Update localStorage when wallet connects
@@ -172,8 +198,8 @@ const WalletContextProvider: React.FC<WalletContextProviderProps> = ({ children 
       } catch (error) {
         console.warn('Error updating wallet connection state:', error);
       }
-    } else if (!connected) {
-      // Only clear connection state, keep wallet name for next time
+    } else if (!connected && wallet === null) {
+      // Only clear connection state when wallet is completely disconnected
       try {
         localStorage.removeItem('walletConnected');
         localStorage.setItem('solana-wallet-adapter-auto-connect', 'false');
@@ -183,6 +209,31 @@ const WalletContextProvider: React.FC<WalletContextProviderProps> = ({ children 
       }
     }
   }, [connected, publicKey, wallet]);
+
+  // Fallback auto-connect mechanism
+  useEffect(() => {
+    // Only attempt fallback if auto-connect was attempted but failed
+    if (autoConnectAttempted && !connected && !connecting) {
+      const storedWalletName = safeGetWalletStorage('walletName');
+      const wasConnected = safeGetWalletStorage('walletConnected') === 'true';
+      const autoConnectEnabled = safeGetWalletStorage('solana-wallet-adapter-auto-connect') !== 'false';
+
+      if (storedWalletName && wasConnected && autoConnectEnabled) {
+        // Wait a bit for wallet adapter to settle, then try manual connection
+        const fallbackTimer = setTimeout(() => {
+          if (!connected && !connecting) {
+            console.log('🔄 Attempting fallback auto-connect to:', storedWalletName);
+            // This will trigger the wallet selection modal if needed
+            connect().catch(error => {
+              console.warn('Fallback auto-connect failed:', error);
+            });
+          }
+        }, 2000); // Wait 2 seconds before fallback attempt
+
+        return () => clearTimeout(fallbackTimer);
+      }
+    }
+  }, [autoConnectAttempted, connected, connecting, connect]);
 
   // Handle wallet connection to WebSocket
   useEffect(() => {
@@ -373,7 +424,11 @@ export const WalletProviderWrapper: React.FC<WalletProviderProps> = ({ children 
     try {
       const wasConnected = localStorage.getItem('walletConnected') === 'true';
       const walletName = localStorage.getItem('walletName');
-      return wasConnected && walletName;
+      const autoConnectEnabled = localStorage.getItem('solana-wallet-adapter-auto-connect') !== 'false';
+
+      console.log('🔍 Auto-connect check:', { wasConnected, walletName, autoConnectEnabled });
+
+      return wasConnected && walletName && autoConnectEnabled;
     } catch (error) {
       console.warn('Error checking auto-connect state:', error);
       return false;
@@ -387,12 +442,14 @@ export const WalletProviderWrapper: React.FC<WalletProviderProps> = ({ children 
       <WalletProvider
         wallets={wallets}
         autoConnect={shouldAutoConnect()}
+        localStorageKey="solana-wallet-adapter-wallet-name"
         onError={(error) => {
           console.error('Wallet error:', error);
           // Clear connection state if there's a persistent error
           if (error.message?.includes('User rejected') === false) {
             try {
               localStorage.removeItem('walletConnected');
+              localStorage.setItem('solana-wallet-adapter-auto-connect', 'false');
             } catch (e) {
               console.warn('Error clearing wallet state:', e);
             }
