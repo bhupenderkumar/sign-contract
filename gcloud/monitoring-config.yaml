@@ -1,0 +1,223 @@
+# Google Cloud Monitoring Configuration
+# Digital Contract Platform - Production Monitoring
+
+# Alert Policies
+alertPolicies:
+  - displayName: "High Error Rate - Backend"
+    conditions:
+      - displayName: "Error rate > 5%"
+        conditionThreshold:
+          filter: 'resource.type="cloud_run_revision" AND resource.labels.service_name="digital-contract-backend"'
+          comparison: COMPARISON_GREATER_THAN
+          thresholdValue: 0.05
+          duration: 300s
+          aggregations:
+            - alignmentPeriod: 60s
+              perSeriesAligner: ALIGN_RATE
+              crossSeriesReducer: REDUCE_MEAN
+              groupByFields:
+                - resource.labels.service_name
+    notificationChannels:
+      - projects/PROJECT_ID/notificationChannels/NOTIFICATION_CHANNEL_ID
+    alertStrategy:
+      autoClose: 86400s
+
+  - displayName: "High Response Time - Backend"
+    conditions:
+      - displayName: "Response time > 2s"
+        conditionThreshold:
+          filter: 'resource.type="cloud_run_revision" AND resource.labels.service_name="digital-contract-backend"'
+          comparison: COMPARISON_GREATER_THAN
+          thresholdValue: 2000
+          duration: 300s
+          aggregations:
+            - alignmentPeriod: 60s
+              perSeriesAligner: ALIGN_MEAN
+              crossSeriesReducer: REDUCE_MEAN
+              groupByFields:
+                - resource.labels.service_name
+    notificationChannels:
+      - projects/PROJECT_ID/notificationChannels/NOTIFICATION_CHANNEL_ID
+
+  - displayName: "High Memory Usage - Backend"
+    conditions:
+      - displayName: "Memory usage > 80%"
+        conditionThreshold:
+          filter: 'resource.type="cloud_run_revision" AND resource.labels.service_name="digital-contract-backend"'
+          comparison: COMPARISON_GREATER_THAN
+          thresholdValue: 0.8
+          duration: 300s
+          aggregations:
+            - alignmentPeriod: 60s
+              perSeriesAligner: ALIGN_MEAN
+              crossSeriesReducer: REDUCE_MEAN
+              groupByFields:
+                - resource.labels.service_name
+    notificationChannels:
+      - projects/PROJECT_ID/notificationChannels/NOTIFICATION_CHANNEL_ID
+
+  - displayName: "Service Down - Backend"
+    conditions:
+      - displayName: "Service unavailable"
+        conditionAbsent:
+          filter: 'resource.type="cloud_run_revision" AND resource.labels.service_name="digital-contract-backend"'
+          duration: 300s
+          aggregations:
+            - alignmentPeriod: 60s
+              perSeriesAligner: ALIGN_RATE
+              crossSeriesReducer: REDUCE_SUM
+              groupByFields:
+                - resource.labels.service_name
+    notificationChannels:
+      - projects/PROJECT_ID/notificationChannels/NOTIFICATION_CHANNEL_ID
+
+  - displayName: "High Error Rate - Frontend"
+    conditions:
+      - displayName: "Error rate > 5%"
+        conditionThreshold:
+          filter: 'resource.type="cloud_run_revision" AND resource.labels.service_name="digital-contract-frontend"'
+          comparison: COMPARISON_GREATER_THAN
+          thresholdValue: 0.05
+          duration: 300s
+          aggregations:
+            - alignmentPeriod: 60s
+              perSeriesAligner: ALIGN_RATE
+              crossSeriesReducer: REDUCE_MEAN
+              groupByFields:
+                - resource.labels.service_name
+    notificationChannels:
+      - projects/PROJECT_ID/notificationChannels/NOTIFICATION_CHANNEL_ID
+
+# Dashboards
+dashboards:
+  - displayName: "Digital Contract Platform - Overview"
+    mosaicLayout:
+      tiles:
+        - width: 6
+          height: 4
+          widget:
+            title: "Request Rate"
+            xyChart:
+              dataSets:
+                - timeSeriesQuery:
+                    timeSeriesFilter:
+                      filter: 'resource.type="cloud_run_revision"'
+                      aggregation:
+                        alignmentPeriod: 60s
+                        perSeriesAligner: ALIGN_RATE
+                        crossSeriesReducer: REDUCE_SUM
+                        groupByFields:
+                          - resource.labels.service_name
+                  plotType: LINE
+              yAxis:
+                label: "Requests/sec"
+                scale: LINEAR
+
+        - width: 6
+          height: 4
+          widget:
+            title: "Error Rate"
+            xyChart:
+              dataSets:
+                - timeSeriesQuery:
+                    timeSeriesFilter:
+                      filter: 'resource.type="cloud_run_revision" AND metric.type="run.googleapis.com/request_count"'
+                      aggregation:
+                        alignmentPeriod: 60s
+                        perSeriesAligner: ALIGN_RATE
+                        crossSeriesReducer: REDUCE_SUM
+                        groupByFields:
+                          - resource.labels.service_name
+                          - metric.labels.response_code_class
+                  plotType: LINE
+              yAxis:
+                label: "Error Rate"
+                scale: LINEAR
+
+        - width: 6
+          height: 4
+          widget:
+            title: "Response Time"
+            xyChart:
+              dataSets:
+                - timeSeriesQuery:
+                    timeSeriesFilter:
+                      filter: 'resource.type="cloud_run_revision" AND metric.type="run.googleapis.com/request_latencies"'
+                      aggregation:
+                        alignmentPeriod: 60s
+                        perSeriesAligner: ALIGN_DELTA
+                        crossSeriesReducer: REDUCE_MEAN
+                        groupByFields:
+                          - resource.labels.service_name
+                  plotType: LINE
+              yAxis:
+                label: "Latency (ms)"
+                scale: LINEAR
+
+        - width: 6
+          height: 4
+          widget:
+            title: "Memory Usage"
+            xyChart:
+              dataSets:
+                - timeSeriesQuery:
+                    timeSeriesFilter:
+                      filter: 'resource.type="cloud_run_revision" AND metric.type="run.googleapis.com/container/memory/utilizations"'
+                      aggregation:
+                        alignmentPeriod: 60s
+                        perSeriesAligner: ALIGN_MEAN
+                        crossSeriesReducer: REDUCE_MEAN
+                        groupByFields:
+                          - resource.labels.service_name
+                  plotType: LINE
+              yAxis:
+                label: "Memory Usage (%)"
+                scale: LINEAR
+
+        - width: 12
+          height: 4
+          widget:
+            title: "Recent Logs"
+            logsPanel:
+              filter: 'resource.type="cloud_run_revision" AND (resource.labels.service_name="digital-contract-backend" OR resource.labels.service_name="digital-contract-frontend")'
+              resourceNames:
+                - projects/PROJECT_ID
+
+# Log-based Metrics
+logMetrics:
+  - name: "contract_creation_count"
+    description: "Number of contracts created"
+    filter: 'resource.type="cloud_run_revision" AND jsonPayload.event="contract_created"'
+    metricDescriptor:
+      metricKind: CUMULATIVE
+      valueType: INT64
+      displayName: "Contract Creation Count"
+
+  - name: "contract_signing_count"
+    description: "Number of contracts signed"
+    filter: 'resource.type="cloud_run_revision" AND jsonPayload.event="contract_signed"'
+    metricDescriptor:
+      metricKind: CUMULATIVE
+      valueType: INT64
+      displayName: "Contract Signing Count"
+
+  - name: "platform_fee_collected"
+    description: "Platform fees collected"
+    filter: 'resource.type="cloud_run_revision" AND jsonPayload.event="fee_collected"'
+    metricDescriptor:
+      metricKind: CUMULATIVE
+      valueType: DOUBLE
+      displayName: "Platform Fee Collected (SOL)"
+
+# Notification Channels (to be created separately)
+notificationChannels:
+  - type: "email"
+    displayName: "Admin Email"
+    labels:
+      email_address: "admin@yourcompany.com"
+  
+  - type: "slack"
+    displayName: "Dev Team Slack"
+    labels:
+      channel_name: "#alerts"
+      url: "https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK"

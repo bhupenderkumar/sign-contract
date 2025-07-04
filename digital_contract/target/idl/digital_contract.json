@@ -52,6 +52,10 @@
           "type": {
             "option": "i64"
           }
+        },
+        {
+          "name": "contractValueLamports",
+          "type": "u64"
         }
       ]
     },
@@ -65,8 +69,18 @@
         },
         {
           "name": "signer",
-          "isMut": false,
+          "isMut": true,
           "isSigner": true
+        },
+        {
+          "name": "platformFeeRecipient",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "systemProgram",
+          "isMut": false,
+          "isSigner": false
         }
       ],
       "args": []
@@ -127,6 +141,18 @@
           {
             "name": "isFullySigned",
             "type": "bool"
+          },
+          {
+            "name": "contractValueLamports",
+            "type": "u64"
+          },
+          {
+            "name": "platformFeeLamports",
+            "type": "u64"
+          },
+          {
+            "name": "party2FeePaid",
+            "type": "bool"
           }
         ]
       }
@@ -186,6 +212,11 @@
       "code": 6006,
       "name": "ContractNotActive",
       "msg": "Contract is not active"
+    },
+    {
+      "code": 6007,
+      "name": "UnauthorizedSigner",
+      "msg": "Unauthorized signer"
     }
   ]
 }

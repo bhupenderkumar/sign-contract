@@ -59,7 +59,8 @@ describe("digital_contract", () => {
         title,
         parties,
         mediatorPubkey,
-        null // no expiry
+        null, // no expiry
+        new anchor.BN(100_000_000) // 0.1 SOL in lamports
       )
       .accounts({
         contract: contractAccount.publicKey,
@@ -100,7 +101,8 @@ describe("digital_contract", () => {
         title,
         parties,
         null, // no mediator
-        null // no expiry
+        null, // no expiry
+        new anchor.BN(100_000_000) // 0.1 SOL in lamports
       )
       .accounts({
         contract: contractAccount.publicKey,
@@ -154,7 +156,8 @@ describe("digital_contract", () => {
         title,
         parties,
         null,
-        null
+        null,
+        new anchor.BN(100_000_000) // 0.1 SOL in lamports
       )
       .accounts({
         contract: contractAccount.publicKey,
@@ -194,7 +197,8 @@ describe("digital_contract", () => {
         title,
         parties,
         null,
-        null
+        null,
+        new anchor.BN(100_000_000) // 0.1 SOL in lamports
       )
       .accounts({
         contract: contractAccount.publicKey,

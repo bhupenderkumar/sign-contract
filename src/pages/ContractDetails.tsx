@@ -13,6 +13,7 @@ import { useToast } from "@/components/ui/use-toast";
 import { useWallet } from '@/contexts/WalletContext';
 import Breadcrumbs from '@/components/Breadcrumbs';
 import walletTransactionService from '@/services/walletTransactionService';
+import { Transaction } from '@solana/web3.js';
 import {
   ArrowLeft,
   FileText,
@@ -165,51 +166,108 @@ const ContractDetails = () => {
 
     setSigning(true);
     try {
-      // Use secure wallet signing (production-ready approach)
-      const signingResult = await walletTransactionService.signContractSecurely(
-        { publicKey, signMessage, signTransaction, connected } as any,
-        contract.contractId
-      );
-
-      if (!signingResult.success) {
-        toast({
-          title: "Signing Failed",
-          description: signingResult.error || "Failed to sign contract",
-          variant: "destructive",
-        });
-        return;
-      }
-
-      // Send the signature proof to backend
-      const response = await fetch(`http://localhost:3001/api/contracts/${contract.contractId}/sign`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          signerPublicKey: publicKey.toString(),
-          transactionId: signingResult.transactionId,
-          signatureProof: true // Indicates this was signed with wallet
-        }),
-      });
-
-      if (response.ok) {
-        const result = await response.json();
-        toast({
-          title: "Contract Signed Successfully!",
-          description: "Your signature has been cryptographically verified and recorded.",
-          variant: "default",
+      // Check if this is a blockchain contract
+      if (contract.contractAddress) {
+        // Step 1: Prepare the signing transaction
+        const prepareResponse = await fetch(`http://localhost:3001/api/contracts/${contract.contractId}/prepare-signing`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            signerPublicKey: publicKey.toString()
+          }),
         });
 
-        // Refresh contract details
-        await fetchContractDetails();
+        if (!prepareResponse.ok) {
+          throw new Error('Failed to prepare signing transaction');
+        }
+
+        const { transactionData } = await prepareResponse.json();
+
+        // Step 2: Sign the transaction with user's wallet
+        const transactionBuffer = Buffer.from(transactionData.serializedTransaction, 'base64');
+        const transaction = Transaction.from(transactionBuffer);
+
+        if (!signTransaction) {
+          throw new Error('Wallet does not support transaction signing');
+        }
+
+        const signedTransaction = await signTransaction(transaction);
+
+        // Step 3: Submit the signed transaction
+        const response = await fetch(`http://localhost:3001/api/contracts/${contract.contractId}/submit-signing`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            signedTransaction: Buffer.from(signedTransaction.serialize()).toString('base64'),
+            signerPublicKey: publicKey.toString()
+          }),
+        });
+
+        if (response.ok) {
+          const result = await response.json();
+          toast({
+            title: "Contract Signed Successfully!",
+            description: `Transaction ID: ${result.contract.transactionId}`,
+            variant: "default",
+          });
+
+          // Refresh contract data
+          await fetchContractDetails();
+        } else {
+          const error = await response.json();
+          throw new Error(error.message || 'Failed to submit signing transaction');
+        }
       } else {
-        const errorData = await response.json();
-        toast({
-          title: "Signing Failed",
-          description: errorData.message || "Failed to record signature",
-          variant: "destructive",
+        // Use secure wallet signing for off-chain contracts
+        const signingResult = await walletTransactionService.signContractSecurely(
+          { publicKey, signMessage, signTransaction, connected } as any,
+          contract.contractId
+        );
+
+        if (!signingResult.success) {
+          toast({
+            title: "Signing Failed",
+            description: signingResult.error || "Failed to sign contract",
+            variant: "destructive",
+          });
+          return;
+        }
+
+        // Send the signature proof to backend
+        const response = await fetch(`http://localhost:3001/api/contracts/${contract.contractId}/sign`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            signerPublicKey: publicKey.toString(),
+            transactionId: signingResult.transactionId,
+            signatureProof: true // Indicates this was signed with wallet
+          }),
         });
+
+        if (response.ok) {
+          const result = await response.json();
+          toast({
+            title: "Contract Signed Successfully!",
+            description: "Your signature has been cryptographically verified and recorded.",
+            variant: "default",
+          });
+
+          // Refresh contract details
+          await fetchContractDetails();
+        } else {
+          const errorData = await response.json();
+          toast({
+            title: "Signing Failed",
+            description: errorData.message || "Failed to record signature",
+            variant: "destructive",
+          });
+        }
       }
     } catch (error) {
       console.error('Error signing contract:', error);
@@ -385,7 +443,7 @@ const ContractDetails = () => {
             variant: "default",
           });
           // Refresh contract data to show updates
-          fetchContract();
+          await fetchContractDetails();
         } else {
           toast({
             title: "No Updates Found",

@@ -54,14 +54,19 @@ class SolanaContractService {
         ? Math.floor(contractData.expiryDate.getTime() / 1000)
         : null;
 
-      // Create the contract on-chain with correct parameters
+      // Calculate contract value (default to 0.1 SOL if not provided)
+      const contractValueSOL = contractData.contractValue || 0.1;
+      const contractValueLamports = contractValueSOL * LAMPORTS_PER_SOL;
+
+      // Create the contract on-chain with correct parameters including contract value
       const tx = await this.program.methods
         .createContract(
           documentHash,
           contractData.title,
           partyPublicKeys,
           mediatorPubkey,
-          expiryTimestamp
+          expiryTimestamp,
+          new anchor.BN(contractValueLamports) // Add the missing contract value parameter
         )
         .accounts({
           contract: contractAccount.publicKey,
@@ -76,7 +81,10 @@ class SolanaContractService {
         success: true,
         transactionId: tx,
         contractAddress: contractAccount.publicKey.toString(),
-        platformFee: platformFee / LAMPORTS_PER_SOL
+        platformFee: platformFee / LAMPORTS_PER_SOL,
+        contractValue: contractValueSOL,
+        party1FeePaid: true,
+        party2FeePaid: false
       };
 
     } catch (error) {

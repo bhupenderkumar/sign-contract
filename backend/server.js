@@ -425,8 +425,8 @@ app.post('/api/contracts', async (req, res) => {
   }
 });
 
-// Create Contract On-Chain with Message Signing (Secure)
-app.post('/api/contracts/create-onchain-secure', async (req, res) => {
+// Prepare Contract Transaction for User Signing (User Pays Fees)
+app.post('/api/contracts/prepare-transaction', async (req, res) => {
   try {
     const {
       contractTitle,
@@ -445,7 +445,8 @@ app.post('/api/contracts/create-onchain-secure', async (req, res) => {
       mediatorName,
       mediatorEmail,
       useMediator,
-      expiryDate
+      expiryDate,
+      contractValue // Contract value in SOL
     } = req.body;
 
     // Validate required fields
@@ -505,113 +506,119 @@ app.post('/api/contracts/create-onchain-secure', async (req, res) => {
       parties,
       mediator: useMediator ? { name: mediatorName, email: mediatorEmail } : null,
       useMediator: useMediator || false,
-      expiryDate: expiryDate ? new Date(expiryDate) : null
+      expiryDate: expiryDate ? new Date(expiryDate) : null,
+      contractValue: contractValue || 0.1
     };
 
-    // Use wallet keypair for blockchain transactions (secure approach)
-    // The user's signature proves they authorized this action
-    const blockchainResult = await solanaContractService.createContract(contractData, walletKeypair);
+    // Prepare the transaction for user signing (user pays fees)
+    const transactionData = await solanaContractService.prepareContractTransaction(contractData, party1PublicKey);
 
-    if (!blockchainResult.success) {
+    if (!transactionData.success) {
       return res.status(500).json({
-        message: 'Failed to create contract on blockchain',
-        error: blockchainResult.error
+        message: 'Failed to prepare contract transaction',
+        error: transactionData.error
       });
     }
+
+    // Return transaction data for user to sign
+    res.status(200).json({
+      message: 'Contract transaction prepared successfully',
+      transactionData: {
+        serializedTransaction: transactionData.serializedTransaction,
+        contractAccount: transactionData.contractAccount,
+        platformFee: transactionData.platformFee,
+        contractValue: transactionData.contractValue,
+        contractData: contractData // Include contract data for database storage after signing
+      }
+    });
+
+
+
+  } catch (error) {
+    console.error('Error preparing contract transaction:', error);
+    res.status(500).json({
+      message: 'Failed to prepare contract transaction',
+      error: error.message
+    });
+  }
+});
+
+// Submit Signed Contract Transaction (User Paid Fees)
+app.post('/api/contracts/submit-signed-transaction', async (req, res) => {
+  try {
+    const {
+      signedTransaction,
+      contractData,
+      contractAccount,
+      platformFee,
+      contractValue
+    } = req.body;
+
+    if (!signedTransaction || !contractData || !contractAccount) {
+      return res.status(400).json({
+        message: 'Missing required fields: signedTransaction, contractData, or contractAccount'
+      });
+    }
+
+    // Submit the signed transaction to the blockchain
+    const transactionBuffer = Buffer.from(signedTransaction, 'base64');
+    const connection = solanaContractService.connection;
+
+    const signature = await connection.sendRawTransaction(transactionBuffer, {
+      skipPreflight: false,
+      preflightCommitment: 'confirmed'
+    });
+
+    // Wait for confirmation
+    await connection.confirmTransaction(signature, 'confirmed');
 
     // Calculate document hash for database storage
     const documentHash = calculateDocumentHash(contractData);
 
-    // Create contract in database with blockchain information
+    // Save to database
     const contract = new Contract({
-      contractId,
-      title: contractTitle,
-      description: contractDescription,
-      agreementText,
-      structuredClauses: structuredClauses || [],
+      contractId: contractData.contractId,
+      title: contractData.title,
+      description: contractData.description,
+      agreementText: contractData.agreementText,
+      structuredClauses: contractData.structuredClauses || [],
       documentHash,
-      parties,
-      mediator: useMediator ? { name: mediatorName, email: mediatorEmail } : undefined,
-      useMediator,
-      status: 'solana_created', // New status for blockchain contracts
-      expiryDate: expiryDate ? new Date(expiryDate) : null,
+      parties: contractData.parties,
+      mediator: contractData.mediator,
+      useMediator: contractData.useMediator,
+      status: 'solana_created',
+      expiryDate: contractData.expiryDate ? new Date(contractData.expiryDate) : null,
       blockchainNetwork: req.solanaNetwork || getCurrentNetwork(),
-      blockchainTxHash: blockchainResult.transactionId,
-      contractAddress: blockchainResult.contractAddress,
-      platformFee: blockchainResult.platformFee
+      blockchainTxHash: signature,
+      contractAddress: contractAccount,
+      platformFee: platformFee,
+      contractValue: contractValue,
+      party1FeePaid: true,
+      party2FeePaid: false
     });
 
     await contract.save();
 
-    // Add audit log
-    await contract.addAuditLog('contract_created_onchain', party1PublicKey, {
-      title: contractTitle,
-      partiesCount: parties.length,
-      hasMediator: useMediator,
-      transactionId: blockchainResult.transactionId,
-      contractAddress: blockchainResult.contractAddress,
-      platformFee: blockchainResult.platformFee
-    });
-
-    // Send email notifications to all parties
-    try {
-      const emailPromises = [];
-
-      // Notify party2
-      emailPromises.push(
-        emailService.sendContractCreatedEmail(contract, party2Email, party2Name)
-      );
-
-      // Notify additional parties
-      if (additionalParties && additionalParties.length > 0) {
-        additionalParties.forEach(party => {
-          emailPromises.push(
-            emailService.sendContractCreatedEmail(contract, party.email, party.name)
-          );
-        });
-      }
-
-      // Notify mediator if present
-      if (useMediator && mediatorEmail) {
-        emailPromises.push(
-          emailService.sendContractCreatedEmail(contract, mediatorEmail, mediatorName)
-        );
-      }
-
-      await Promise.all(emailPromises);
-      console.log('📧 Email notifications sent to all parties');
-    } catch (emailError) {
-      console.error('📧 Failed to send email notifications:', emailError);
-      // Don't fail the contract creation if emails fail
-    }
-
     res.status(201).json({
-      success: true,
-      contractId,
-      documentHash,
-      transactionId: blockchainResult.transactionId,
-      contractAddress: blockchainResult.contractAddress,
-      platformFee: blockchainResult.platformFee,
-      explorerUrl: `https://explorer.solana.com/tx/${blockchainResult.transactionId}?cluster=devnet`,
-      message: 'Contract created successfully on Solana blockchain. Email notifications sent to all parties.',
+      message: 'Contract created successfully on blockchain',
       contract: {
-        id: contractId,
-        title: contractTitle,
+        contractId: contract.contractId,
+        title: contract.title,
         status: contract.status,
-        parties: parties.map(p => ({ name: p.name, email: p.email })),
-        createdAt: contract.createdAt,
-        blockchainInfo: {
-          network: req.solanaNetwork || getCurrentNetwork(),
-          transactionId: blockchainResult.transactionId,
-          contractAddress: blockchainResult.contractAddress
-        }
+        contractAddress: contract.contractAddress,
+        transactionId: signature,
+        platformFee: platformFee,
+        contractValue: contractValue,
+        party1FeePaid: true,
+        party2FeePaid: false,
+        explorerUrl: `https://explorer.solana.com/tx/${signature}?cluster=devnet`
       }
     });
 
   } catch (error) {
-    console.error('Error creating on-chain contract:', error);
+    console.error('Error submitting signed transaction:', error);
     res.status(500).json({
-      message: 'Failed to create on-chain contract',
+      message: 'Failed to submit signed transaction',
       error: error.message
     });
   }
@@ -946,6 +953,133 @@ app.post('/api/contracts/:id/sign', async (req, res) => {
     console.error('Error signing contract:', error);
     res.status(500).json({
       message: 'Failed to sign contract',
+      error: error.message
+    });
+  }
+});
+
+// Prepare Contract Signing Transaction (User Pays Fees)
+app.post('/api/contracts/:id/prepare-signing', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { signerPublicKey } = req.body;
+
+    if (!signerPublicKey) {
+      return res.status(400).json({
+        message: 'Signer public key is required'
+      });
+    }
+
+    const contract = await Contract.findOne({ contractId: id });
+    if (!contract) {
+      return res.status(404).json({ message: 'Contract not found' });
+    }
+
+    if (!contract.contractAddress) {
+      return res.status(400).json({
+        message: 'Contract is not deployed on blockchain'
+      });
+    }
+
+    // Check if user can sign this contract
+    const canSign = await solanaContractService.canUserSignContract(contract.contractAddress, signerPublicKey);
+    if (!canSign) {
+      return res.status(403).json({
+        message: 'You are not authorized to sign this contract or have already signed it'
+      });
+    }
+
+    // Prepare the signing transaction
+    const transactionData = await solanaContractService.prepareSigningTransaction(contract.contractAddress, signerPublicKey);
+
+    if (!transactionData.success) {
+      return res.status(500).json({
+        message: 'Failed to prepare signing transaction',
+        error: transactionData.error
+      });
+    }
+
+    res.status(200).json({
+      message: 'Signing transaction prepared successfully',
+      transactionData: {
+        serializedTransaction: transactionData.serializedTransaction,
+        contractAddress: contract.contractAddress,
+        contractId: contract.contractId
+      }
+    });
+
+  } catch (error) {
+    console.error('Error preparing signing transaction:', error);
+    res.status(500).json({
+      message: 'Failed to prepare signing transaction',
+      error: error.message
+    });
+  }
+});
+
+// Submit Signed Contract Signing Transaction (User Paid Fees)
+app.post('/api/contracts/:id/submit-signing', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { signedTransaction, signerPublicKey } = req.body;
+
+    if (!signedTransaction || !signerPublicKey) {
+      return res.status(400).json({
+        message: 'Missing required fields: signedTransaction or signerPublicKey'
+      });
+    }
+
+    const contract = await Contract.findOne({ contractId: id });
+    if (!contract) {
+      return res.status(404).json({ message: 'Contract not found' });
+    }
+
+    // Submit the signed transaction to the blockchain
+    const transactionBuffer = Buffer.from(signedTransaction, 'base64');
+    const connection = solanaContractService.connection;
+
+    const signature = await connection.sendRawTransaction(transactionBuffer, {
+      skipPreflight: false,
+      preflightCommitment: 'confirmed'
+    });
+
+    // Wait for confirmation
+    await connection.confirmTransaction(signature, 'confirmed');
+
+    // Update contract in database
+    const partyIndex = contract.parties.findIndex(party => party.publicKey === signerPublicKey);
+    if (partyIndex !== -1) {
+      contract.parties[partyIndex].hasSigned = true;
+      contract.parties[partyIndex].signedAt = new Date();
+      contract.parties[partyIndex].signatureTransactionId = signature;
+    }
+
+    // Check if all parties have signed
+    const allSigned = contract.parties.every(party => party.hasSigned);
+    if (allSigned) {
+      contract.status = 'completed';
+      contract.completedAt = new Date();
+    } else {
+      contract.status = 'partially_signed';
+    }
+
+    await contract.save();
+
+    res.status(200).json({
+      message: 'Contract signed successfully on blockchain',
+      contract: {
+        contractId: contract.contractId,
+        status: contract.status,
+        transactionId: signature,
+        allSigned: allSigned,
+        explorerUrl: `https://explorer.solana.com/tx/${signature}?cluster=devnet`
+      }
+    });
+
+  } catch (error) {
+    console.error('Error submitting signing transaction:', error);
+    res.status(500).json({
+      message: 'Failed to submit signing transaction',
       error: error.message
     });
   }

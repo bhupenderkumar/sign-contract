@@ -1,0 +1,55 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: digital-contract-frontend
+  annotations:
+    run.googleapis.com/ingress: all
+    run.googleapis.com/execution-environment: gen2
+spec:
+  template:
+    metadata:
+      annotations:
+        run.googleapis.com/cpu-throttling: "false"
+        run.googleapis.com/memory: "1Gi"
+        run.googleapis.com/cpu: "500m"
+        run.googleapis.com/max-scale: "20"
+        run.googleapis.com/min-scale: "1"
+    spec:
+      containerConcurrency: 200
+      timeoutSeconds: 300
+      containers:
+      - image: gcr.io/PROJECT_ID/digital-contract-frontend:latest
+        ports:
+        - containerPort: 8080
+        env:
+        - name: NODE_ENV
+          value: "production"
+        - name: REACT_APP_API_URL
+          value: "https://digital-contract-backend-PROJECT_ID.a.run.app"
+        - name: REACT_APP_SOLANA_CLUSTER
+          value: "mainnet-beta"
+        - name: REACT_APP_PLATFORM_FEE_RECIPIENT
+          value: "BcSXav3jcBKRbN6woZsqPMJGYrS2MXwVEdtUx1ZzD9Xo"
+        resources:
+          limits:
+            cpu: "500m"
+            memory: "1Gi"
+          requests:
+            cpu: "250m"
+            memory: "512Mi"
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3

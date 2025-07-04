@@ -16,6 +16,7 @@ import { useWallet } from '@/contexts/WalletContext';
 import { useWallet as useSolanaWallet } from '@solana/wallet-adapter-react';
 import { useWalletWebSocket } from '@/hooks/useWalletWebSocket';
 import walletTransactionService from '@/services/walletTransactionService';
+import { Transaction } from '@solana/web3.js';
 import DeploymentLoader from '@/components/DeploymentLoader';
 
 interface ContractFormData {
@@ -42,7 +43,7 @@ const ContractCreation = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
   const { connected, publicKey } = useWallet();
-  const { signMessage } = useSolanaWallet();
+  const { signMessage, signTransaction } = useSolanaWallet();
   const {
     isWalletReady,
     loading: wsLoading,
@@ -485,8 +486,8 @@ const ContractCreation = () => {
             console.log('Wallet does not support message signing, using public key as proof');
           }
 
-          // Create contract on Solana blockchain using the secure endpoint
-          response = await fetch('http://localhost:3001/api/contracts/create-onchain-secure', {
+          // Step 1: Prepare the transaction
+          const prepareResponse = await fetch('http://localhost:3001/api/contracts/prepare-transaction', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -508,7 +509,39 @@ const ContractCreation = () => {
               mediatorName: formData.useMediator ? formData.mediatorName : undefined,
               mediatorEmail: formData.useMediator ? formData.mediatorEmail : undefined,
               useMediator: formData.useMediator,
-              expiryDate: null // Handle expiry date if needed
+              expiryDate: null, // Handle expiry date if needed
+              contractValue: 0.1 // Default contract value in SOL
+            }),
+          });
+
+          if (!prepareResponse.ok) {
+            throw new Error('Failed to prepare transaction');
+          }
+
+          const { transactionData } = await prepareResponse.json();
+
+          // Step 2: Sign the transaction with user's wallet
+          const transactionBuffer = Buffer.from(transactionData.serializedTransaction, 'base64');
+          const transaction = Transaction.from(transactionBuffer);
+
+          if (!signTransaction) {
+            throw new Error('Wallet does not support transaction signing');
+          }
+
+          const signedTransaction = await signTransaction(transaction);
+
+          // Step 3: Submit the signed transaction
+          response = await fetch('http://localhost:3001/api/contracts/submit-signed-transaction', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              signedTransaction: Buffer.from(signedTransaction.serialize()).toString('base64'),
+              contractData: transactionData.contractData,
+              contractAccount: transactionData.contractAccount,
+              platformFee: transactionData.platformFee,
+              contractValue: transactionData.contractValue
             }),
           });
         } catch (error) {

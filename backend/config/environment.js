@@ -14,9 +14,9 @@ const NETWORK_CONFIGS = {
     isProduction: false,
     alternativeEndpoints: [
       'https://api.devnet.solana.com',
-      'https://devnet.helius-rpc.com',
-      'https://rpc-devnet.helius.xyz',
-      clusterApiUrl('devnet')
+      clusterApiUrl('devnet'),
+      'https://devnet.solana.com',
+      'https://rpc.ankr.com/solana_devnet'
     ]
   },
   'testnet': {
