@@ -64,28 +64,36 @@ export const getNetworkConfig = (network?: SolanaNetwork): NetworkConfig => {
 
 // Get API base URL
 export const getApiBaseUrl = (): string => {
+  // In production (Vercel), use relative URLs to the same domain
+  if (isProduction()) {
+    return '/api';
+  }
+
+  // In development, use the environment variable or default to localhost
   return import.meta.env.VITE_API_URL || 'http://localhost:3001';
 };
 
 // Environment validation
 export const validateEnvironment = (): { isValid: boolean; errors: string[] } => {
   const errors: string[] = [];
-  
-  // Check required environment variables
-  const requiredVars = ['VITE_API_URL', 'VITE_SOLANA_CLUSTER'];
-  
-  for (const varName of requiredVars) {
-    if (!import.meta.env[varName]) {
-      errors.push(`Missing required environment variable: ${varName}`);
+
+  // In development, check for required environment variables
+  if (isDevelopment()) {
+    const requiredVars = ['VITE_API_URL', 'VITE_SOLANA_CLUSTER'];
+
+    for (const varName of requiredVars) {
+      if (!import.meta.env[varName]) {
+        errors.push(`Missing required environment variable: ${varName}`);
+      }
     }
   }
-  
-  // Validate network
+
+  // Validate network if provided
   const network = import.meta.env.VITE_SOLANA_CLUSTER;
   if (network && !Object.keys(NETWORK_CONFIGS).includes(network)) {
     errors.push(`Invalid VITE_SOLANA_CLUSTER: ${network}. Must be one of: ${Object.keys(NETWORK_CONFIGS).join(', ')}`);
   }
-  
+
   return {
     isValid: errors.length === 0,
     errors

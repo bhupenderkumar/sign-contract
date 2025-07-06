@@ -1,0 +1,71 @@
+# Google App Engine configuration for frontend - STAGING
+runtime: nodejs18
+service: default
+
+# Static file serving for built React app
+handlers:
+  # Serve static assets with caching
+  - url: /static
+    static_dir: dist/static
+    secure: always
+    http_headers:
+      Cache-Control: "public, max-age=31536000, immutable"
+      
+  # Serve other assets
+  - url: /assets
+    static_dir: dist/assets
+    secure: always
+    http_headers:
+      Cache-Control: "public, max-age=31536000, immutable"
+      
+  # Serve favicon and other root files
+  - url: /(favicon\.ico|robots\.txt|sitemap\.xml|.*\.svg|.*\.png)
+    static_files: dist/\1
+    upload: dist/(favicon\.ico|robots\.txt|sitemap\.xml|.*\.svg|.*\.png)
+    secure: always
+    http_headers:
+      Cache-Control: "public, max-age=86400"
+      
+  # API routes - proxy to backend service
+  - url: /api/.*
+    script: auto
+    secure: always
+    
+  # All other routes serve index.html for React Router
+  - url: /.*
+    static_files: dist/index.html
+    upload: dist/index\.html
+    secure: always
+    http_headers:
+      Cache-Control: "no-cache, no-store, must-revalidate"
+
+# Environment variables for frontend - STAGING
+env_variables:
+  NODE_ENV: "staging"
+  VITE_API_URL: "https://backend-dot-YOUR_PROJECT_ID.uc.r.appspot.com"
+  VITE_BACKEND_URL: "https://backend-dot-YOUR_PROJECT_ID.uc.r.appspot.com"
+  VITE_SOLANA_CLUSTER: "devnet"
+  VITE_FRONTEND_URL: "https://YOUR_PROJECT_ID.uc.r.appspot.com"
+  VITE_ENABLE_DEBUG: "true"
+  VITE_ENABLE_DEV_TOOLS: "true"
+
+# Staging-specific scaling
+automatic_scaling:
+  min_instances: 0
+  max_instances: 5
+  target_cpu_utilization: 0.6
+
+# Health check
+readiness_check:
+  path: "/"
+  check_interval_sec: 5
+  timeout_sec: 4
+  failure_threshold: 2
+  success_threshold: 2
+
+liveness_check:
+  path: "/"
+  check_interval_sec: 30
+  timeout_sec: 4
+  failure_threshold: 4
+  success_threshold: 2

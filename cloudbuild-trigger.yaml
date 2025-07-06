@@ -1,0 +1,37 @@
+# Cloud Build Trigger Configuration for GitHub Integration
+# This file defines the trigger that connects your GitHub repository to Cloud Build
+
+name: securecontract-github-trigger
+description: "Automated deployment trigger for SecureContract Pro from GitHub"
+
+# GitHub repository configuration
+github:
+  owner: bhupenderkumar  # Replace with your GitHub username
+  name: sign-contract    # Replace with your repository name
+  push:
+    branch: "^main$"     # Trigger on pushes to main branch
+
+# Build configuration
+filename: cloudbuild.yaml
+
+# Substitution variables
+substitutions:
+  _ENVIRONMENT: "staging"
+  _DEPLOY_REGION: "us-central1"
+
+# Additional configuration
+includeBuildLogs: INCLUDE_BUILD_LOGS_WITH_STATUS
+logsBucket: "gs://${PROJECT_ID}_cloudbuild_logs"
+
+# Service account (optional - uses default Cloud Build service account)
+# serviceAccount: "projects/${PROJECT_ID}/serviceAccounts/cloudbuild@${PROJECT_ID}.iam.gserviceaccount.com"
+
+# Build timeout
+timeout: "1200s"
+
+# Tags for organization
+tags:
+  - "securecontract"
+  - "github"
+  - "automated"
+  - "staging"

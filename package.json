@@ -5,10 +5,19 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "npm run build:frontend && npm run build:api",
+    "build:frontend": "vite build",
+    "build:api": "cd api && npm install",
     "build:dev": "vite build --mode development",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "vercel-build": "npm run build:frontend",
+    "gcloud:setup": "./scripts/setup-gcloud-secrets.sh",
+    "gcloud:deploy": "./scripts/deploy-to-gcloud.sh",
+    "gcloud:build": "npm run build:frontend",
+    "github:setup": "./scripts/setup-github-deployment.sh",
+    "deploy:staging": "git push origin main",
+    "deploy:production": "git push origin production"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.0",

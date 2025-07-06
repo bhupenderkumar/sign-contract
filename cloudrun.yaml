@@ -1,0 +1,78 @@
+# Google Cloud Run configuration for backend
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: securecontract-backend
+  annotations:
+    run.googleapis.com/ingress: all
+    run.googleapis.com/execution-environment: gen2
+spec:
+  template:
+    metadata:
+      annotations:
+        run.googleapis.com/cpu-throttling: "false"
+        run.googleapis.com/execution-environment: gen2
+        autoscaling.knative.dev/maxScale: "10"
+        autoscaling.knative.dev/minScale: "1"
+    spec:
+      containerConcurrency: 80
+      timeoutSeconds: 300
+      containers:
+      - image: gcr.io/PROJECT_ID/securecontract-backend:latest
+        ports:
+        - containerPort: 8080
+        env:
+        - name: NODE_ENV
+          value: "production"
+        - name: PORT
+          value: "8080"
+        - name: SOLANA_NETWORK
+          value: "devnet"
+        - name: SOLANA_RPC_URL
+          value: "https://api.devnet.solana.com"
+        - name: CORS_ORIGIN
+          value: "https://PROJECT_ID.uc.r.appspot.com"
+        - name: MONGODB_URI
+          valueFrom:
+            secretKeyRef:
+              name: mongodb-uri
+              key: uri
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: jwt-secret
+              key: secret
+        - name: RESEND_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: resend-api-key
+              key: key
+        - name: PLATFORM_FEE_RECIPIENT_PRIVATE_KEY
+          valueFrom:
+            secretKeyRef:
+              name: platform-fee-private-key
+              key: key
+        resources:
+          limits:
+            cpu: "2"
+            memory: "2Gi"
+          requests:
+            cpu: "1"
+            memory: "1Gi"
+        livenessProbe:
+          httpGet:
+            path: /api/health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /api/health
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 5
+  traffic:
+  - percent: 100
+    latestRevision: true

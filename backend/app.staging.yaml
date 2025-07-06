@@ -1,0 +1,56 @@
+# Google App Engine configuration for backend API - STAGING
+runtime: nodejs18
+service: backend
+
+# Instance configuration for staging
+automatic_scaling:
+  min_instances: 0
+  max_instances: 5
+  target_cpu_utilization: 0.6
+  target_throughput_utilization: 0.6
+
+# Environment variables for staging
+env_variables:
+  NODE_ENV: "staging"
+  PORT: "8080"
+  SOLANA_NETWORK: "devnet"
+  SOLANA_RPC_URL: "https://api.devnet.solana.com"
+  CORS_ORIGIN: "https://YOUR_PROJECT_ID.uc.r.appspot.com"
+  LOG_LEVEL: "debug"
+  ENABLE_REQUEST_LOGGING: "true"
+  ENABLE_DEBUG_ROUTES: "true"
+  # Secrets are accessed via Secret Manager in the application code
+  MONGODB_URI: "projects/YOUR_PROJECT_ID/secrets/mongodb-uri/versions/latest"
+  JWT_SECRET: "projects/YOUR_PROJECT_ID/secrets/jwt-secret/versions/latest"
+  RESEND_API_KEY: "projects/YOUR_PROJECT_ID/secrets/resend-api-key/versions/latest"
+  PLATFORM_FEE_RECIPIENT_PRIVATE_KEY: "projects/YOUR_PROJECT_ID/secrets/platform-fee-private-key/versions/latest"
+
+# Health checks
+readiness_check:
+  path: "/api/health"
+  check_interval_sec: 5
+  timeout_sec: 4
+  failure_threshold: 2
+  success_threshold: 2
+
+liveness_check:
+  path: "/api/health"
+  check_interval_sec: 30
+  timeout_sec: 4
+  failure_threshold: 4
+  success_threshold: 2
+
+# Network settings
+network:
+  forwarded_ports:
+    - 8080
+
+# Security settings
+handlers:
+  - url: /api/.*
+    script: auto
+    secure: always
+    
+  - url: /.*
+    script: auto
+    secure: always

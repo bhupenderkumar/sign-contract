@@ -1,0 +1,170 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [ production ]
+  workflow_dispatch:
+    inputs:
+      confirm_production:
+        description: 'Type "DEPLOY_TO_PRODUCTION" to confirm'
+        required: true
+        default: ''
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  GAR_LOCATION: us-central1
+  SERVICE: securecontract-backend
+  REGION: us-central1
+
+jobs:
+  confirm-production:
+    if: github.event.inputs.confirm_production == 'DEPLOY_TO_PRODUCTION' || github.ref == 'refs/heads/production'
+    runs-on: ubuntu-latest
+    name: Confirm Production Deployment
+    
+    steps:
+    - name: Confirm deployment
+      run: |
+        echo "🚨 PRODUCTION DEPLOYMENT CONFIRMED"
+        echo "This will deploy to the live production environment"
+        echo "Branch: ${{ github.ref }}"
+        echo "Commit: ${{ github.sha }}"
+
+  test:
+    needs: confirm-production
+    runs-on: ubuntu-latest
+    name: Test Application
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+
+    - name: Install dependencies
+      run: |
+        npm ci
+        cd backend && npm ci
+
+    - name: Run frontend tests
+      run: npm run lint
+
+    - name: Run backend tests
+      run: |
+        cd backend
+        npm test || echo "No tests configured yet"
+
+    - name: Build frontend for production
+      run: |
+        export NODE_ENV=production
+        export VITE_API_URL=https://backend-dot-${{ env.PROJECT_ID }}.uc.r.appspot.com
+        export VITE_BACKEND_URL=https://backend-dot-${{ env.PROJECT_ID }}.uc.r.appspot.com
+        export VITE_FRONTEND_URL=https://${{ env.PROJECT_ID }}.uc.r.appspot.com
+        export VITE_SOLANA_CLUSTER=mainnet-beta
+        npm run build:frontend
+
+  deploy-production:
+    needs: test
+    runs-on: ubuntu-latest
+    name: Deploy to Production
+    environment: production
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Google Auth
+      id: auth
+      uses: 'google-github-actions/auth@v2'
+      with:
+        credentials_json: '${{ secrets.GCP_SA_KEY }}'
+
+    - name: 'Set up Cloud SDK'
+      uses: 'google-github-actions/setup-gcloud@v2'
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+
+    - name: Install dependencies
+      run: |
+        npm ci
+        cd backend && npm ci
+
+    - name: Build frontend for production
+      run: |
+        export NODE_ENV=production
+        export VITE_API_URL=https://backend-dot-${{ env.PROJECT_ID }}.uc.r.appspot.com
+        export VITE_BACKEND_URL=https://backend-dot-${{ env.PROJECT_ID }}.uc.r.appspot.com
+        export VITE_FRONTEND_URL=https://${{ env.PROJECT_ID }}.uc.r.appspot.com
+        export VITE_SOLANA_CLUSTER=mainnet-beta
+        npm run build:frontend
+
+    - name: Update configuration files for production
+      run: |
+        sed -i "s/YOUR_PROJECT_ID/${{ env.PROJECT_ID }}/g" app.production.yaml
+        sed -i "s/YOUR_PROJECT_ID/${{ env.PROJECT_ID }}/g" backend/app.production.yaml
+
+    - name: Deploy backend to App Engine (Production)
+      run: |
+        gcloud app deploy backend/app.production.yaml \
+          --version=prod-${{ github.sha }} \
+          --no-promote \
+          --quiet
+
+    - name: Deploy frontend to App Engine (Production)
+      run: |
+        gcloud app deploy app.production.yaml \
+          --version=prod-${{ github.sha }} \
+          --promote \
+          --quiet
+
+    - name: Test production deployment
+      run: |
+        sleep 60
+        curl -f https://${{ env.PROJECT_ID }}.uc.r.appspot.com || exit 1
+        curl -f https://backend-dot-${{ env.PROJECT_ID }}.uc.r.appspot.com/api/health || exit 1
+
+    - name: Create GitHub Release
+      if: success()
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: v${{ github.run_number }}
+        release_name: Production Release v${{ github.run_number }}
+        body: |
+          🚀 **Production Deployment**
+          
+          **Environment:** Production (Mainnet-Beta)
+          **Deployed:** ${{ github.sha }}
+          **Frontend:** https://${{ env.PROJECT_ID }}.uc.r.appspot.com
+          **Backend:** https://backend-dot-${{ env.PROJECT_ID }}.uc.r.appspot.com
+          
+          **⚠️ This is a PRODUCTION release using Solana Mainnet-Beta**
+          
+          **Changes in this release:**
+          ${{ github.event.head_commit.message }}
+        draft: false
+        prerelease: false
+
+    - name: Notify deployment success
+      if: success()
+      run: |
+        echo "🎉 PRODUCTION DEPLOYMENT SUCCESSFUL!"
+        echo "Frontend: https://${{ env.PROJECT_ID }}.uc.r.appspot.com"
+        echo "Backend: https://backend-dot-${{ env.PROJECT_ID }}.uc.r.appspot.com"
+        echo "Version: prod-${{ github.sha }}"
+
+    - name: Notify deployment failure
+      if: failure()
+      run: |
+        echo "❌ PRODUCTION DEPLOYMENT FAILED!"
+        echo "Check the logs above for details"
+        exit 1

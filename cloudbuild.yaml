@@ -1,0 +1,102 @@
+# Google Cloud Build configuration for SecureContract Pro
+# Triggered automatically from GitHub repository
+
+steps:
+  # Install dependencies for frontend
+  - name: 'node:18'
+    entrypoint: 'npm'
+    args: ['ci']
+    dir: '.'
+
+  # Install dependencies for backend
+  - name: 'node:18'
+    entrypoint: 'npm'
+    args: ['ci']
+    dir: 'backend'
+
+  # Run tests
+  - name: 'node:18'
+    entrypoint: 'npm'
+    args: ['run', 'lint']
+    dir: '.'
+
+  # Update configuration files with project ID
+  - name: 'gcr.io/cloud-builders/gcloud'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        sed -i "s/YOUR_PROJECT_ID/$PROJECT_ID/g" app.yaml
+        sed -i "s/YOUR_PROJECT_ID/$PROJECT_ID/g" backend/app.yaml
+        echo "Configuration files updated with project ID: $PROJECT_ID"
+
+  # Build frontend with environment-specific variables
+  - name: 'node:18'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        export NODE_ENV=production
+        if [ "$BRANCH_NAME" = "main" ]; then
+          export VITE_SOLANA_CLUSTER=devnet
+          echo "Building for staging (devnet)"
+        elif [ "$BRANCH_NAME" = "production" ]; then
+          export VITE_SOLANA_CLUSTER=mainnet-beta
+          echo "Building for production (mainnet-beta)"
+        else
+          export VITE_SOLANA_CLUSTER=devnet
+          echo "Building for development (devnet)"
+        fi
+        export VITE_API_URL=https://backend-dot-$PROJECT_ID.uc.r.appspot.com
+        export VITE_BACKEND_URL=https://backend-dot-$PROJECT_ID.uc.r.appspot.com
+        export VITE_FRONTEND_URL=https://$PROJECT_ID.uc.r.appspot.com
+        npm run build:frontend
+    dir: '.'
+
+  # Deploy backend service
+  - name: 'gcr.io/cloud-builders/gcloud'
+    args:
+      - 'app'
+      - 'deploy'
+      - 'backend/app.yaml'
+      - '--version=${BRANCH_NAME}-${SHORT_SHA}'
+      - '--no-promote'
+      - '--quiet'
+    env:
+      - 'CLOUDSDK_APP_CLOUD_BUILD_TIMEOUT=1200'
+
+  # Deploy frontend service
+  - name: 'gcr.io/cloud-builders/gcloud'
+    args:
+      - 'app'
+      - 'deploy'
+      - 'app.yaml'
+      - '--version=${BRANCH_NAME}-${SHORT_SHA}'
+      - '--promote'
+      - '--quiet'
+    env:
+      - 'CLOUDSDK_APP_CLOUD_BUILD_TIMEOUT=1200'
+
+  # Test deployment
+  - name: 'gcr.io/cloud-builders/curl'
+    args:
+      - '-f'
+      - 'https://$PROJECT_ID.uc.r.appspot.com'
+
+  - name: 'gcr.io/cloud-builders/curl'
+    args:
+      - '-f'
+      - 'https://backend-dot-$PROJECT_ID.uc.r.appspot.com/api/health'
+
+# Build options
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: 'E2_HIGHCPU_8'
+  
+# Timeout for the entire build
+timeout: '1200s'
+
+# Substitutions for environment variables
+substitutions:
+  _ENVIRONMENT: 'production'
+  _SOLANA_NETWORK: 'devnet'
