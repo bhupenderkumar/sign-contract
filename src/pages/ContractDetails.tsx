@@ -11,6 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/components/ui/use-toast";
 import { useWallet } from '@/contexts/WalletContext';
+import { useWallet as useSolanaWallet } from '@solana/wallet-adapter-react';
 import Breadcrumbs from '@/components/Breadcrumbs';
 import walletTransactionService from '@/services/walletTransactionService';
 import { Transaction } from '@solana/web3.js';
@@ -28,7 +29,13 @@ import {
   MessageSquare,
   Flag,
   Send,
-  RefreshCw
+  Activity,
+  Calendar,
+  Hash,
+  Link2,
+  RefreshCw,
+  Bell,
+  UserCheck
 } from "lucide-react";
 
 interface ContractDetails {
@@ -78,6 +85,7 @@ const ContractDetails = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
   const { publicKey, connected, connect, signTransaction } = useWallet();
+  const { signMessage } = useSolanaWallet();
   
   const [contract, setContract] = useState<ContractDetails | null>(null);
   const [loading, setLoading] = useState(true);
@@ -91,6 +99,8 @@ const ContractDetails = () => {
   });
   const [submittingDispute, setSubmittingDispute] = useState(false);
   const [isSyncingBlockchain, setIsSyncingBlockchain] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [requestingSignature, setRequestingSignature] = useState<string | null>(null);
 
   useEffect(() => {
     if (id) {
@@ -102,7 +112,7 @@ const ContractDetails = () => {
     try {
       setLoading(true);
       const response = await fetch(`http://localhost:3001/api/contracts/${id}`);
-      
+
       if (response.ok) {
         const data = await response.json();
         if (data.success && data.contract) {
@@ -118,6 +128,55 @@ const ContractDetails = () => {
       console.error('Error fetching contract:', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const refreshContractDetails = async () => {
+    try {
+      setIsRefreshing(true);
+
+      // First, sync with blockchain if it's a blockchain contract
+      if (contract?.blockchainInfo?.contractAddress) {
+        console.log('🔄 Syncing contract with blockchain...');
+        const syncResponse = await fetch(`http://localhost:3001/api/contracts/${id}/sync-blockchain`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        });
+
+        if (syncResponse.ok) {
+          const syncData = await syncResponse.json();
+          console.log('✅ Blockchain sync completed:', syncData);
+
+          toast({
+            title: "Blockchain Sync Complete",
+            description: "Contract details updated from blockchain",
+            variant: "default",
+          });
+        } else {
+          console.warn('⚠️ Blockchain sync failed, continuing with regular refresh');
+        }
+      }
+
+      // Then fetch updated contract details
+      await fetchContractDetails();
+
+      toast({
+        title: "Contract Refreshed",
+        description: "Contract details have been updated",
+        variant: "default",
+      });
+
+    } catch (err) {
+      console.error('Error refreshing contract:', err);
+      toast({
+        title: "Refresh Failed",
+        description: "Failed to refresh contract details",
+        variant: "destructive",
+      });
+    } finally {
+      setIsRefreshing(false);
     }
   };
 
@@ -167,7 +226,7 @@ const ContractDetails = () => {
     setSigning(true);
     try {
       // Check if this is a blockchain contract
-      if (contract.contractAddress) {
+      if (contract.blockchainInfo?.contractAddress) {
         // Step 1: Prepare the signing transaction
         const prepareResponse = await fetch(`http://localhost:3001/api/contracts/${contract.contractId}/prepare-signing`, {
           method: 'POST',
@@ -371,7 +430,12 @@ const ContractDetails = () => {
           raisedByName: getUserName(),
           reason: disputeForm.reason,
           description: disputeForm.description,
-          evidence: disputeForm.evidence ? [disputeForm.evidence] : []
+          evidence: disputeForm.evidence ? [{
+            type: 'text',
+            content: disputeForm.evidence,
+            filename: null,
+            uploadedAt: new Date().toISOString()
+          }] : []
         }),
       });
 
@@ -479,6 +543,276 @@ const ContractDetails = () => {
     return disputableStates.includes(contract.status);
   };
 
+  const requestSignatureFromParty = async (party: any) => {
+    if (!contract || !connected || !publicKey) {
+      toast({
+        title: "Wallet Not Connected",
+        description: "Please connect your wallet to request signatures.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Check if the current user is authorized to request signatures
+    const isAuthorizedUser = contract.parties.some(p => p.publicKey === publicKey.toString()) ||
+                            (contract.mediator && 'publicKey' in contract.mediator && contract.mediator.publicKey === publicKey.toString());
+
+    if (!isAuthorizedUser) {
+      toast({
+        title: "Unauthorized",
+        description: "Only contract parties or mediators can request signatures.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (party.hasSigned) {
+      toast({
+        title: "Already Signed",
+        description: `${party.name} has already signed this contract.`,
+        variant: "default",
+      });
+      return;
+    }
+
+    setRequestingSignature(party.publicKey);
+
+    try {
+      // Request browser notification permission if not granted
+      if (Notification.permission === 'default') {
+        const permission = await Notification.requestPermission();
+        if (permission !== 'granted') {
+          toast({
+            title: "Notification Permission Required",
+            description: "Please allow notifications to send signature requests.",
+            variant: "destructive",
+          });
+          return;
+        }
+      }
+
+      // Send signature request to backend
+      const response = await fetch(`http://localhost:3001/api/contracts/${contract.contractId}/request-signature`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          requesterPublicKey: publicKey.toString(),
+          requesterName: getUserName(),
+          targetPartyPublicKey: party.publicKey,
+          targetPartyName: party.name,
+          targetPartyEmail: party.email,
+          contractTitle: contract.title,
+          contractId: contract.contractId
+        }),
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+
+        // Show browser notification
+        if (Notification.permission === 'granted') {
+          const notification = new Notification(`Signature Request Sent`, {
+            body: `Signature request sent to ${party.name} for contract: ${contract.title}`,
+            icon: '/favicon.ico',
+            tag: `signature-request-${party.publicKey}`,
+            requireInteraction: true
+          });
+
+          notification.onclick = () => {
+            window.focus();
+            notification.close();
+          };
+
+          // Auto close after 10 seconds
+          setTimeout(() => {
+            notification.close();
+          }, 10000);
+        }
+
+        toast({
+          title: "Signature Request Sent",
+          description: `${party.name} has been notified to sign the contract via email and browser notification.`,
+          variant: "default",
+        });
+
+        // If the target party is currently viewing the contract, show them a popup
+        if (party.publicKey === publicKey.toString()) {
+          showSignatureRequestPopup(party);
+        }
+
+      } else {
+        const errorData = await response.json();
+        toast({
+          title: "Request Failed",
+          description: errorData.message || "Failed to send signature request",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      console.error('Error requesting signature:', error);
+      toast({
+        title: "Error",
+        description: "An error occurred while sending the signature request",
+        variant: "destructive",
+      });
+    } finally {
+      setRequestingSignature(null);
+    }
+  };
+
+  const showSignatureRequestPopup = (party: any) => {
+    // Create a popup window for signature request
+    const popupContent = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Signature Request - ${contract?.title}</title>
+          <style>
+            body {
+              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+              margin: 0;
+              padding: 20px;
+              background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+              color: white;
+              min-height: 100vh;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+            }
+            .container {
+              background: rgba(255, 255, 255, 0.1);
+              backdrop-filter: blur(10px);
+              border-radius: 20px;
+              padding: 30px;
+              max-width: 500px;
+              text-align: center;
+              border: 1px solid rgba(255, 255, 255, 0.2);
+            }
+            .icon {
+              font-size: 48px;
+              margin-bottom: 20px;
+            }
+            h1 {
+              margin: 0 0 10px 0;
+              font-size: 24px;
+            }
+            p {
+              margin: 10px 0;
+              opacity: 0.9;
+            }
+            .contract-info {
+              background: rgba(255, 255, 255, 0.1);
+              padding: 15px;
+              border-radius: 10px;
+              margin: 20px 0;
+            }
+            .buttons {
+              margin-top: 30px;
+              display: flex;
+              gap: 15px;
+              justify-content: center;
+            }
+            button {
+              padding: 12px 24px;
+              border: none;
+              border-radius: 8px;
+              font-weight: 600;
+              cursor: pointer;
+              transition: all 0.3s ease;
+            }
+            .sign-btn {
+              background: #10b981;
+              color: white;
+            }
+            .sign-btn:hover {
+              background: #059669;
+              transform: translateY(-2px);
+            }
+            .later-btn {
+              background: rgba(255, 255, 255, 0.2);
+              color: white;
+            }
+            .later-btn:hover {
+              background: rgba(255, 255, 255, 0.3);
+            }
+            .pulse {
+              animation: pulse 2s infinite;
+            }
+            @keyframes pulse {
+              0% { transform: scale(1); }
+              50% { transform: scale(1.05); }
+              100% { transform: scale(1); }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="icon">📝</div>
+            <h1>Signature Request</h1>
+            <p>You have been requested to sign a digital contract</p>
+
+            <div class="contract-info">
+              <h3>${contract?.title}</h3>
+              <p><strong>Contract ID:</strong> ${contract?.contractId}</p>
+              <p><strong>Requested by:</strong> ${getUserName()}</p>
+              <p><strong>Status:</strong> ${contract?.status}</p>
+            </div>
+
+            <p>Please review the contract and provide your digital signature.</p>
+
+            <div class="buttons">
+              <button class="sign-btn pulse" onclick="signContract()">
+                🔐 Sign Now
+              </button>
+              <button class="later-btn" onclick="signLater()">
+                ⏰ Sign Later
+              </button>
+            </div>
+          </div>
+
+          <script>
+            function signContract() {
+              // Close popup and focus on main window to sign
+              window.opener.focus();
+              window.close();
+              // Trigger signing in main window
+              window.opener.postMessage({
+                action: 'triggerSigning',
+                contractId: '${contract?.contractId}'
+              }, '*');
+            }
+
+            function signLater() {
+              window.close();
+            }
+
+            // Auto close after 30 seconds
+            setTimeout(() => {
+              window.close();
+            }, 30000);
+          </script>
+        </body>
+      </html>
+    `;
+
+    const popup = window.open('', 'signatureRequest', 'width=600,height=500,scrollbars=no,resizable=no,status=no,location=no,toolbar=no,menubar=no');
+    if (popup) {
+      popup.document.write(popupContent);
+      popup.document.close();
+
+      // Listen for messages from popup
+      const messageListener = (event: MessageEvent) => {
+        if (event.data.action === 'triggerSigning' && event.data.contractId === contract?.contractId) {
+          handleSign();
+          window.removeEventListener('message', messageListener);
+        }
+      };
+      window.addEventListener('message', messageListener);
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white flex items-center justify-center">
@@ -529,55 +863,93 @@ const ContractDetails = () => {
           />
         </div>
 
-        {/* Header */}
-        <div className="flex items-center justify-between mb-8">
-          <div className="flex items-center">
-            <Button
-              variant="ghost"
-              onClick={() => navigate('/')}
-              className="text-slate-300 hover:bg-slate-700 mr-4"
-            >
-              <ArrowLeft className="h-4 w-4 mr-2" />
-              Back to Home
-            </Button>
-            <div>
-              <h1 className="text-4xl font-bold text-white">{contract.title}</h1>
-              <p className="text-slate-400 mt-2">{contract.description}</p>
-            </div>
-          </div>
-          
-          <div className="text-right">
-            <div className="flex items-center justify-end gap-2 mb-2">
-              <Badge className={`${getStatusColor(contract.status)}`}>
-                {getStatusText(contract.status)}
-              </Badge>
-              {contract.blockchainInfo?.isBlockchainContract && (
-                <Badge className="bg-blue-600/20 text-blue-300 border-blue-600/30">
-                  <Shield className="h-3 w-3 mr-1" />
-                  Blockchain
+        {/* Enhanced Header */}
+        <div className="bg-gradient-to-r from-slate-800 to-slate-700 rounded-xl p-6 mb-8 border border-slate-600 shadow-xl">
+          <div className="flex items-start justify-between">
+            <div className="flex-1">
+              <div className="flex items-center space-x-4 mb-4">
+                <Button
+                  variant="ghost"
+                  onClick={() => navigate('/')}
+                  className="text-slate-300 hover:text-white hover:bg-slate-600"
+                >
+                  <ArrowLeft className="h-4 w-4 mr-2" />
+                  Back to Home
+                </Button>
+                <div className="h-6 w-px bg-slate-600"></div>
+                <Badge className={`${getStatusColor(contract.status)}`}>
+                  {getStatusText(contract.status)}
                 </Badge>
+                {contract.blockchainInfo?.isBlockchainContract && (
+                  <Badge className="bg-purple-600/20 text-purple-300 border-purple-600/30">
+                    <Shield className="h-3 w-3 mr-1" />
+                    Blockchain Contract
+                  </Badge>
+                )}
+              </div>
+
+              <h1 className="text-4xl font-bold text-white mb-2">{contract.title}</h1>
+              <p className="text-slate-300 text-lg mb-4">{contract.description}</p>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                <div className="flex items-center text-slate-400">
+                  <Calendar className="h-4 w-4 mr-2" />
+                  <span>Created: {new Date(contract.createdAt).toLocaleDateString()}</span>
+                </div>
+                <div className="flex items-center text-slate-400">
+                  <Users className="h-4 w-4 mr-2" />
+                  <span>{contract.parties.length} Parties</span>
+                </div>
+                <div className="flex items-center text-slate-400">
+                  <Hash className="h-4 w-4 mr-2" />
+                  <span>ID: {contract.contractId}</span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={copyContractId}
+                    className="h-6 w-6 p-0 ml-2"
+                  >
+                    <Copy className="h-3 w-3" />
+                  </Button>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center space-x-3 ml-6">
+              <Button
+                variant="outline"
+                onClick={refreshContractDetails}
+                disabled={isRefreshing}
+                className="bg-slate-700 border-slate-600 text-slate-300 hover:bg-slate-600 hover:text-white"
+              >
+                {isRefreshing ? (
+                  <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                )}
+                {isRefreshing ? 'Syncing...' : 'Refresh'}
+              </Button>
+
+              <Button
+                variant="outline"
+                onClick={handleDownloadPDF}
+                className="bg-slate-700 border-slate-600 text-slate-300 hover:bg-slate-600"
+              >
+                <Download className="h-4 w-4 mr-2" />
+                Download PDF
+              </Button>
+
+              {contract.blockchainInfo?.contractAddress && (
+                <Button
+                  variant="outline"
+                  onClick={() => window.open(`https://explorer.solana.com/address/${contract.blockchainInfo.contractAddress}?cluster=devnet`, '_blank')}
+                  className="bg-purple-600 border-purple-500 text-white hover:bg-purple-700"
+                >
+                  <ExternalLink className="h-4 w-4 mr-2" />
+                  View on Explorer
+                </Button>
               )}
             </div>
-            <div className="flex items-center justify-end gap-2 text-slate-400 text-sm mb-2">
-              <span>ID: {contract.contractId}</span>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={copyContractId}
-                className="h-6 w-6 p-0"
-              >
-                <Copy className="h-3 w-3" />
-              </Button>
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleDownloadPDF}
-              className="bg-slate-700 border-slate-600 text-slate-300 hover:bg-slate-600"
-            >
-              <Download className="h-4 w-4 mr-2" />
-              Download PDF
-            </Button>
           </div>
         </div>
 
@@ -643,35 +1015,99 @@ const ContractDetails = () => {
           </div>
         )}
 
-        {/* Main Content */}
+        {/* Enhanced Main Content */}
         <Tabs defaultValue="overview" className="space-y-6">
-          <TabsList className="bg-slate-800 border-slate-700">
-            <TabsTrigger value="overview" className="data-[state=active]:bg-slate-700">
+          <TabsList className="bg-slate-800/50 border border-slate-600 p-1 rounded-lg backdrop-blur-sm">
+            <TabsTrigger
+              value="overview"
+              className="data-[state=active]:bg-slate-700 data-[state=active]:text-white data-[state=active]:shadow-lg transition-all duration-200"
+            >
               <FileText className="h-4 w-4 mr-2" />
               Overview
             </TabsTrigger>
-            <TabsTrigger value="parties" className="data-[state=active]:bg-slate-700">
+            <TabsTrigger
+              value="parties"
+              className="data-[state=active]:bg-slate-700 data-[state=active]:text-white data-[state=active]:shadow-lg transition-all duration-200"
+            >
               <Users className="h-4 w-4 mr-2" />
               Parties & Signatures
             </TabsTrigger>
-            <TabsTrigger value="blockchain" className="data-[state=active]:bg-slate-700">
+            <TabsTrigger
+              value="blockchain"
+              className="data-[state=active]:bg-slate-700 data-[state=active]:text-white data-[state=active]:shadow-lg transition-all duration-200"
+            >
               <Shield className="h-4 w-4 mr-2" />
               Blockchain
             </TabsTrigger>
-            <TabsTrigger value="timeline" className="data-[state=active]:bg-slate-700">
-              <Clock className="h-4 w-4 mr-2" />
-              Timeline
+            <TabsTrigger
+              value="timeline"
+              className="data-[state=active]:bg-slate-700 data-[state=active]:text-white data-[state=active]:shadow-lg transition-all duration-200"
+            >
+              <Activity className="h-4 w-4 mr-2" />
+              Timeline & Audit
             </TabsTrigger>
           </TabsList>
 
           <TabsContent value="overview" className="space-y-6">
-            <Card className="bg-slate-800 border-slate-700">
+            {/* Contract Stats Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+              <Card className="bg-gradient-to-br from-blue-600/20 to-blue-800/20 border-blue-600/30">
+                <CardContent className="p-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-blue-300 text-sm font-medium">Contract Status</p>
+                      <p className="text-white text-2xl font-bold">{getStatusText(contract.status)}</p>
+                    </div>
+                    <div className="h-12 w-12 bg-blue-600/20 rounded-lg flex items-center justify-center">
+                      <FileText className="h-6 w-6 text-blue-400" />
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="bg-gradient-to-br from-green-600/20 to-green-800/20 border-green-600/30">
+                <CardContent className="p-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-green-300 text-sm font-medium">Signatures</p>
+                      <p className="text-white text-2xl font-bold">
+                        {contract.parties.filter(p => p.hasSigned).length}/{contract.parties.length}
+                      </p>
+                    </div>
+                    <div className="h-12 w-12 bg-green-600/20 rounded-lg flex items-center justify-center">
+                      <CheckCircle className="h-6 w-6 text-green-400" />
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="bg-gradient-to-br from-purple-600/20 to-purple-800/20 border-purple-600/30">
+                <CardContent className="p-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-purple-300 text-sm font-medium">Contract Type</p>
+                      <p className="text-white text-2xl font-bold">
+                        {contract.blockchainInfo?.contractAddress ? 'Blockchain' : 'Traditional'}
+                      </p>
+                    </div>
+                    <div className="h-12 w-12 bg-purple-600/20 rounded-lg flex items-center justify-center">
+                      <Shield className="h-6 w-6 text-purple-400" />
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+
+            <Card className="bg-slate-800/50 border-slate-700 backdrop-blur-sm">
               <CardHeader>
-                <CardTitle className="text-white">Contract Agreement</CardTitle>
+                <CardTitle className="text-white flex items-center">
+                  <FileText className="h-5 w-5 mr-2 text-blue-400" />
+                  Contract Agreement
+                </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="prose prose-invert max-w-none">
-                  <div className="whitespace-pre-wrap text-slate-300">
+                  <div className="whitespace-pre-wrap text-slate-300 leading-relaxed">
                     {contract.agreementText}
                   </div>
                 </div>
@@ -702,32 +1138,59 @@ const ContractDetails = () => {
                 {contract.parties && contract.parties.length > 0 ? (
                   contract.parties.map((party, index) => (
                     <div key={index} className="flex items-center justify-between p-4 bg-slate-700 rounded-lg">
-                      <div>
+                      <div className="flex-1">
                         <h4 className="font-semibold text-white">{party.name || 'Unknown Party'}</h4>
                         <p className="text-slate-400 text-sm">{party.email || 'No email provided'}</p>
                         <p className="text-slate-500 text-xs font-mono">{party.publicKey || 'No public key'}</p>
                       </div>
-                      <div className="text-right">
+                      <div className="flex items-center space-x-3">
                         {party.hasSigned ? (
-                          <div>
+                          <div className="text-right">
                             <Badge className="bg-green-100 text-green-800 border-green-200 mb-1">
                               <CheckCircle className="h-3 w-3 mr-1" />
                               Signed
                             </Badge>
                             {party.signedAt && (
-                            <p className="text-slate-400 text-xs">
-                              {new Date(party.signedAt).toLocaleDateString()}
-                            </p>
-                          )}
-                        </div>
-                      ) : (
-                        <Badge className="bg-yellow-100 text-yellow-800 border-yellow-200">
-                          <Clock className="h-3 w-3 mr-1" />
-                          Pending
-                        </Badge>
-                      )}
+                              <p className="text-slate-400 text-xs">
+                                {new Date(party.signedAt).toLocaleDateString()}
+                              </p>
+                            )}
+                          </div>
+                        ) : (
+                          <>
+                            <div className="text-right">
+                              <Badge className="bg-yellow-100 text-yellow-800 border-yellow-200">
+                                <Clock className="h-3 w-3 mr-1" />
+                                Pending
+                              </Badge>
+                            </div>
+                            {/* Request Signature Button */}
+                            {connected && publicKey && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => requestSignatureFromParty(party)}
+                                disabled={requestingSignature === party.publicKey}
+                                className="bg-blue-600/20 border-blue-600/30 text-blue-300 hover:bg-blue-600/30 hover:text-white"
+                                title={`Request signature from ${party.name}`}
+                              >
+                                {requestingSignature === party.publicKey ? (
+                                  <>
+                                    <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-300 mr-2"></div>
+                                    Requesting...
+                                  </>
+                                ) : (
+                                  <>
+                                    <Bell className="h-3 w-3 mr-2" />
+                                    Request Signature
+                                  </>
+                                )}
+                              </Button>
+                            )}
+                          </>
+                        )}
+                      </div>
                     </div>
-                  </div>
                   ))
                 ) : (
                   <div className="text-center py-8">
@@ -819,18 +1282,60 @@ const ContractDetails = () => {
                                 {/* Action details */}
                                 {entry.details && Object.keys(entry.details).length > 0 && (
                                   <div className="mt-3 pt-3 border-t border-slate-600">
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
-                                      {Object.entries(entry.details).map(([key, value]) => (
-                                        <div key={key} className="flex justify-between">
-                                          <span className="text-slate-400 capitalize">{key.replace(/_/g, ' ')}:</span>
-                                          <span className="text-slate-300 font-mono">
-                                            {typeof value === 'string' && value.length > 20
-                                              ? `${value.substring(0, 20)}...`
-                                              : String(value)
-                                            }
-                                          </span>
-                                        </div>
-                                      ))}
+                                    <div className="space-y-3">
+                                      {Object.entries(entry.details).map(([key, value]) => {
+                                        const isLongValue = typeof value === 'string' && value.length > 20;
+                                        const isTransactionId = key.toLowerCase().includes('transaction') || key.toLowerCase().includes('address');
+
+                                        return (
+                                          <div key={key} className="space-y-1">
+                                            <span className="text-slate-400 capitalize text-xs block">
+                                              {key.replace(/_/g, ' ')}:
+                                            </span>
+                                            {isLongValue || isTransactionId ? (
+                                              <div className="flex items-center space-x-2">
+                                                <code className="bg-slate-800 px-2 py-1 rounded text-green-400 text-xs font-mono flex-1 break-all">
+                                                  {String(value)}
+                                                </code>
+                                                <Button
+                                                  variant="ghost"
+                                                  size="sm"
+                                                  onClick={() => {
+                                                    navigator.clipboard.writeText(String(value));
+                                                    toast({
+                                                      title: "Copied!",
+                                                      description: `${key.replace(/_/g, ' ')} copied to clipboard`,
+                                                      variant: "default",
+                                                    });
+                                                  }}
+                                                  className="h-6 w-6 p-0 text-slate-400 hover:text-white"
+                                                >
+                                                  <Copy className="h-3 w-3" />
+                                                </Button>
+                                                {isTransactionId && (
+                                                  <Button
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    onClick={() => {
+                                                      const explorerUrl = key.toLowerCase().includes('transaction')
+                                                        ? `https://explorer.solana.com/tx/${value}?cluster=devnet`
+                                                        : `https://explorer.solana.com/address/${value}?cluster=devnet`;
+                                                      window.open(explorerUrl, '_blank');
+                                                    }}
+                                                    className="h-6 w-6 p-0 text-slate-400 hover:text-white"
+                                                  >
+                                                    <ExternalLink className="h-3 w-3" />
+                                                  </Button>
+                                                )}
+                                              </div>
+                                            ) : (
+                                              <span className="text-slate-300 text-xs">
+                                                {String(value)}
+                                              </span>
+                                            )}
+                                          </div>
+                                        );
+                                      })}
                                     </div>
                                   </div>
                                 )}
@@ -926,7 +1431,7 @@ const ContractDetails = () => {
                         <div>
                           <Label className="text-slate-400 text-sm">Contract Address</Label>
                           <div className="flex items-center mt-1 space-x-2">
-                            <code className="bg-slate-700 px-3 py-2 rounded text-green-400 text-sm font-mono flex-1">
+                            <code className="bg-slate-700 px-3 py-2 rounded text-green-400 text-sm font-mono flex-1 break-all">
                               {contract.blockchainInfo.contractAddress}
                             </code>
                             <Button
@@ -944,6 +1449,16 @@ const ContractDetails = () => {
                             >
                               <Copy className="h-3 w-3" />
                             </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                window.open(`https://explorer.solana.com/address/${contract.blockchainInfo.contractAddress}?cluster=devnet`, '_blank');
+                              }}
+                              className="h-8 w-8 p-0"
+                            >
+                              <ExternalLink className="h-3 w-3" />
+                            </Button>
                           </div>
                         </div>
                       )}
@@ -954,11 +1469,8 @@ const ContractDetails = () => {
                         <div>
                           <Label className="text-slate-400 text-sm">Transaction ID</Label>
                           <div className="flex items-center mt-1 space-x-2">
-                            <code className="bg-slate-700 px-3 py-2 rounded text-green-400 text-sm font-mono flex-1">
-                              {contract.blockchainInfo.transactionId.length > 20
-                                ? `${contract.blockchainInfo.transactionId.substring(0, 20)}...`
-                                : contract.blockchainInfo.transactionId
-                              }
+                            <code className="bg-slate-700 px-3 py-2 rounded text-green-400 text-sm font-mono flex-1 break-all">
+                              {contract.blockchainInfo.transactionId}
                             </code>
                             <Button
                               variant="ghost"
@@ -974,6 +1486,16 @@ const ContractDetails = () => {
                               className="h-8 w-8 p-0"
                             >
                               <Copy className="h-3 w-3" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                window.open(`https://explorer.solana.com/tx/${contract.blockchainInfo.transactionId}?cluster=devnet`, '_blank');
+                              }}
+                              className="h-8 w-8 p-0"
+                            >
+                              <ExternalLink className="h-3 w-3" />
                             </Button>
                           </div>
                         </div>

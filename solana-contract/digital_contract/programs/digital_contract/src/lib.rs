@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 use anchor_lang::system_program;
 
-declare_id!("4bmYTgHAoYfBBwoELVqUzc9n8DTfFvtt7CodYq78wzir");
+declare_id!("7ow2v1f2EFNWQAVwn6aXih3kuXBP5FAX9ni48Uqva1LK");
 
 const PLATFORM_FEE_BASIS_POINTS: u64 = 10; // 0.1% = 10 basis points (1 basis point = 0.01%)
 const MIN_PLATFORM_FEE_LAMPORTS: u64 = 1_000_000; // Minimum 0.001 SOL

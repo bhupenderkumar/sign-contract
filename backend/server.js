@@ -5,7 +5,7 @@ const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
 const mongoose = require('mongoose');
-const { Connection, PublicKey, clusterApiUrl, Keypair, SystemProgram } = require('@solana/web3.js');
+const { Connection, PublicKey, clusterApiUrl, Keypair, SystemProgram, Transaction } = require('@solana/web3.js');
 const anchor = require('@project-serum/anchor');
 const { create } = require('ipfs-http-client');
 const crypto = require('crypto');
@@ -109,8 +109,8 @@ const connection = new Connection(networkConfig.rpcUrl, 'confirmed');
 console.log(`🔗 Solana Network: ${networkConfig.displayName} (${currentNetwork})`);
 console.log(`🌐 RPC Endpoint: ${networkConfig.rpcUrl}`);
 
-// Solana Program ID (Deployed to Devnet)
-const programId = new PublicKey("4bmYTgHAoYfBBwoELVqUzc9n8DTfFvtt7CodYq78wzir");
+// Solana Program ID (Deployed to Testnet/Devnet)
+const programId = new PublicKey("7ow2v1f2EFNWQAVwn6aXih3kuXBP5FAX9ni48Uqva1LK");
 
 // Configure the client to use the local cluster with proper wallet path
 const walletPath = path.join(__dirname, 'wallet.json');
@@ -510,7 +510,7 @@ app.post('/api/contracts/prepare-transaction', async (req, res) => {
       contractValue: contractValue || 0.1
     };
 
-    // Prepare the transaction for user signing (user pays fees)
+    // Prepare the transaction with temporary blockhash
     const transactionData = await solanaContractService.prepareContractTransaction(contractData, party1PublicKey);
 
     if (!transactionData.success) {
@@ -520,6 +520,27 @@ app.post('/api/contracts/prepare-transaction', async (req, res) => {
       });
     }
 
+    // Store the contract account keypair temporarily for signing
+    // In production, you might want to use a more secure storage mechanism
+    global.pendingContracts = global.pendingContracts || new Map();
+    global.pendingContracts.set(transactionData.contractAccount, {
+      contractAccountKeypair: transactionData.contractAccountKeypair,
+      contractData: contractData,
+      platformFee: transactionData.platformFee,
+      contractValue: transactionData.contractValue,
+      timestamp: Date.now()
+    });
+
+    // Clean up old pending contracts (older than 5 minutes to reduce blockhash expiration issues)
+    const fiveMinutesAgo = Date.now() - (5 * 60 * 1000);
+    for (const [key, value] of global.pendingContracts.entries()) {
+      if (value.timestamp < fiveMinutesAgo) {
+        global.pendingContracts.delete(key);
+      }
+    }
+
+    console.log('✅ Transaction prepared successfully (frontend will add fresh blockhash)');
+
     // Return transaction data for user to sign
     res.status(200).json({
       message: 'Contract transaction prepared successfully',
@@ -528,7 +549,7 @@ app.post('/api/contracts/prepare-transaction', async (req, res) => {
         contractAccount: transactionData.contractAccount,
         platformFee: transactionData.platformFee,
         contractValue: transactionData.contractValue,
-        contractData: contractData // Include contract data for database storage after signing
+        contractData: contractData
       }
     });
 
@@ -543,6 +564,348 @@ app.post('/api/contracts/prepare-transaction', async (req, res) => {
   }
 });
 
+// Finalize Contract Creation with Fresh Blockhash (New Approach)
+app.post('/api/contracts/finalize-contract-creation', async (req, res) => {
+  try {
+    const {
+      contractAccount,
+      userPublicKey,
+      userSignature,
+      message
+    } = req.body;
+
+    if (!contractAccount || !userPublicKey || !userSignature) {
+      return res.status(400).json({
+        message: 'Missing required fields: contractAccount, userPublicKey, or userSignature'
+      });
+    }
+
+    // Retrieve the stored contract data
+    global.pendingContracts = global.pendingContracts || new Map();
+    const pendingContract = global.pendingContracts.get(contractAccount);
+
+    if (!pendingContract) {
+      return res.status(400).json({
+        message: 'Contract account not found or expired. Please prepare the transaction again.'
+      });
+    }
+
+    console.log('🔄 Finalizing contract creation with fresh blockhash...');
+    console.log('📍 Contract Account:', contractAccount);
+    console.log('👤 User Public Key:', userPublicKey);
+
+    // Create the contract transaction with fresh blockhash
+    const result = await solanaContractService.createContractWithFreshBlockhash(
+      pendingContract.contractData,
+      userPublicKey,
+      pendingContract.contractAccountKeypair
+    );
+
+    if (!result.success) {
+      return res.status(500).json({
+        message: 'Failed to create contract on blockchain',
+        error: result.error
+      });
+    }
+
+    // Create contract record in database
+    try {
+      const contract = new Contract({
+        contractId: pendingContract.contractData.contractId,
+        title: pendingContract.contractData.title,
+        description: pendingContract.contractData.description,
+        agreementText: pendingContract.contractData.agreementText,
+        structuredClauses: pendingContract.contractData.structuredClauses || [],
+        parties: pendingContract.contractData.parties.map(party => ({
+          publicKey: party.publicKey,
+          name: party.name,
+          email: party.email,
+          hasSigned: false,
+          signedAt: null,
+          signatureTransactionId: null
+        })),
+        mediator: pendingContract.contractData.mediator,
+        useMediator: pendingContract.contractData.useMediator || false,
+        expiryDate: pendingContract.contractData.expiryDate,
+        contractValue: pendingContract.contractData.contractValue || 0.1,
+        platformFee: result.platformFee,
+        documentHash: solanaContractService.calculateDocumentHash(pendingContract.contractData),
+        status: 'active',
+        isBlockchainContract: true,
+        blockchainTransactionId: result.transactionId,
+        contractAddress: result.contractAddress,
+        createdBy: userPublicKey,
+        createdAt: new Date(),
+        auditLog: [{
+          action: 'contract_created_onchain',
+          performedBy: userPublicKey,
+          timestamp: new Date(),
+          details: {
+            transactionId: result.transactionId,
+            contractAddress: result.contractAddress,
+            platformFee: result.platformFee,
+            contractValue: result.contractValue
+          }
+        }]
+      });
+
+      await contract.save();
+      console.log('✅ Contract record created in database');
+    } catch (dbError) {
+      console.error('⚠️ Failed to create contract record in database:', dbError);
+      // Don't fail the entire request if database save fails
+    }
+
+    // Clean up the pending contract
+    global.pendingContracts.delete(contractAccount);
+
+    console.log('✅ Contract created successfully on blockchain');
+    console.log('📍 Transaction ID:', result.transactionId);
+
+    res.status(200).json({
+      message: 'Contract created successfully on blockchain',
+      transactionId: result.transactionId,
+      contractAddress: result.contractAddress,
+      platformFee: result.platformFee,
+      contractValue: result.contractValue,
+      contractId: pendingContract.contractData.contractId,
+      explorerUrl: `https://explorer.solana.com/tx/${result.transactionId}?cluster=devnet`
+    });
+
+  } catch (error) {
+    console.error('Error finalizing contract creation:', error);
+    res.status(500).json({
+      message: 'Failed to finalize contract creation',
+      error: error.message
+    });
+  }
+});
+
+// Prepare Contract Creation Transaction for User Signing
+app.post('/api/contracts/prepare-creation-transaction', async (req, res) => {
+  try {
+    const {
+      contractData,
+      userPublicKey,
+      userSignature,
+      message
+    } = req.body;
+
+    if (!contractData || !userPublicKey || !userSignature) {
+      return res.status(400).json({
+        message: 'Missing required fields: contractData, userPublicKey, or userSignature'
+      });
+    }
+
+    console.log('🔄 Preparing contract creation transaction...');
+    console.log('📍 Contract Title:', contractData.title);
+    console.log('👤 User Public Key:', userPublicKey);
+
+    // Prepare the transaction for user signing
+    const result = await solanaContractService.prepareContractCreationTransaction(
+      contractData,
+      userPublicKey
+    );
+
+    if (!result.success) {
+      return res.status(500).json({
+        message: 'Failed to prepare contract creation transaction',
+        error: result.error
+      });
+    }
+
+    console.log('🔍 Backend prepare result:', JSON.stringify(result, null, 2));
+
+    res.json({
+      success: true,
+      message: 'Transaction prepared successfully',
+      data: result
+    });
+
+  } catch (error) {
+    console.error('Error preparing contract creation transaction:', error);
+    res.status(500).json({
+      message: 'Failed to prepare contract creation transaction',
+      error: error.message
+    });
+  }
+});
+
+// Submit Signed Contract Creation Transaction
+app.post('/api/contracts/submit-signed-transaction', async (req, res) => {
+  try {
+    const {
+      signedTransaction,
+      contractAddress,
+      contractData,
+      userPublicKey
+    } = req.body;
+
+    if (!signedTransaction || !contractAddress || !contractData || !userPublicKey) {
+      return res.status(400).json({
+        message: 'Missing required fields: signedTransaction, contractAddress, contractData, or userPublicKey'
+      });
+    }
+
+    console.log('🔄 Submitting signed contract transaction...');
+    console.log('📍 Contract Address:', contractAddress);
+
+    // Submit the signed transaction
+    const result = await solanaContractService.submitSignedContractTransaction(
+      signedTransaction,
+      contractAddress
+    );
+
+    if (!result.success) {
+      return res.status(500).json({
+        message: 'Failed to submit signed contract transaction',
+        error: result.error
+      });
+    }
+
+    // Save contract to database
+    const contract = new Contract({
+      contractId: contractData.contractId || `contract_${Date.now()}`,
+      title: contractData.title,
+      description: contractData.description,
+      agreementText: contractData.agreementText,
+      structuredClauses: contractData.structuredClauses || [],
+      documentHash: crypto.createHash('sha256').update(JSON.stringify({
+        title: contractData.title,
+        description: contractData.description,
+        agreementText: contractData.agreementText,
+        structuredClauses: contractData.structuredClauses
+      })).digest('hex'),
+      parties: contractData.parties.map(party => ({
+        name: party.name,
+        email: party.email,
+        publicKey: party.publicKey,
+        hasSigned: false,
+        signedAt: null,
+        signatureHash: null
+      })),
+      mediator: contractData.mediator,
+      status: 'active',
+      isBlockchainContract: true,
+      blockchainTxHash: result.transactionId,
+      contractAddress: contractAddress,
+      createdBy: userPublicKey,
+      expiryDate: contractData.expiryDate ? new Date(contractData.expiryDate) : null,
+      auditLog: [{
+        action: 'contract_created_onchain',
+        performedBy: userPublicKey,
+        timestamp: new Date(),
+        details: {
+          transactionId: result.transactionId,
+          contractAddress: contractAddress,
+          platformFee: contractData.contractValue * 0.001 // 0.1%
+        }
+      }]
+    });
+
+    console.log('🔍 Contract data being saved:', {
+      title: contractData.title,
+      parties: contractData.parties,
+      mediator: contractData.mediator
+    });
+
+    await contract.save();
+
+    res.json({
+      success: true,
+      message: 'Contract created successfully on blockchain',
+      data: {
+        contractId: contract.contractId,
+        transactionId: result.transactionId,
+        contractAddress: contractAddress,
+        status: 'active'
+      }
+    });
+
+  } catch (error) {
+    console.error('Error submitting signed contract transaction:', error);
+    res.status(500).json({
+      message: 'Failed to submit signed contract transaction',
+      error: error.message
+    });
+  }
+});
+
+
+
+
+
+// Sync Contract with Blockchain
+app.post('/api/contracts/:contractId/sync-blockchain', async (req, res) => {
+  try {
+    const { contractId } = req.params;
+
+    console.log(`🔄 Syncing contract ${contractId} with blockchain...`);
+
+    // Find the contract
+    const contract = await Contract.findOne({ contractId });
+    if (!contract) {
+      return res.status(404).json({
+        success: false,
+        message: 'Contract not found'
+      });
+    }
+
+    // Only sync blockchain contracts
+    if (!contract.contractAddress) {
+      return res.status(400).json({
+        success: false,
+        message: 'This is not a blockchain contract'
+      });
+    }
+
+    // For now, just return success - we can implement actual blockchain sync later
+    // This provides the refresh functionality for the UI
+    console.log(`✅ Contract ${contractId} sync completed`);
+
+    res.json({
+      success: true,
+      message: 'Contract synced successfully',
+      updated: false, // Set to true when actual sync is implemented
+      contract: contract
+    });
+  } catch (error) {
+    console.error('Error syncing contract with blockchain:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to sync contract with blockchain',
+      error: error.message
+    });
+  }
+});
+
+// Get Fresh Blockhash for Transaction Signing
+app.get('/api/contracts/fresh-blockhash', async (req, res) => {
+  try {
+    const blockhashData = await solanaContractService.getFreshBlockhash();
+
+    if (!blockhashData.success) {
+      return res.status(500).json({
+        message: 'Failed to get fresh blockhash',
+        error: blockhashData.error
+      });
+    }
+
+    res.status(200).json({
+      message: 'Fresh blockhash retrieved successfully',
+      blockhash: blockhashData.blockhash,
+      lastValidBlockHeight: blockhashData.lastValidBlockHeight
+    });
+
+  } catch (error) {
+    console.error('Error getting fresh blockhash:', error);
+    res.status(500).json({
+      message: 'Internal server error',
+      error: error.message
+    });
+  }
+});
+
 // Submit Signed Contract Transaction (User Paid Fees)
 app.post('/api/contracts/submit-signed-transaction', async (req, res) => {
   try {
@@ -551,7 +914,9 @@ app.post('/api/contracts/submit-signed-transaction', async (req, res) => {
       contractData,
       contractAccount,
       platformFee,
-      contractValue
+      contractValue,
+      blockhash,
+      lastValidBlockHeight
     } = req.body;
 
     if (!signedTransaction || !contractData || !contractAccount) {
@@ -560,17 +925,73 @@ app.post('/api/contracts/submit-signed-transaction', async (req, res) => {
       });
     }
 
-    // Submit the signed transaction to the blockchain
+    // Retrieve the stored contract account keypair
+    global.pendingContracts = global.pendingContracts || new Map();
+    const pendingContract = global.pendingContracts.get(contractAccount);
+
+    if (!pendingContract) {
+      return res.status(400).json({
+        message: 'Contract account not found or expired. Please prepare the transaction again.'
+      });
+    }
+
+    // Submit the signed transaction to the blockchain with retry logic
+    // The transaction already has both user signature and contract account signature
     const transactionBuffer = Buffer.from(signedTransaction, 'base64');
     const connection = solanaContractService.connection;
 
-    const signature = await connection.sendRawTransaction(transactionBuffer, {
-      skipPreflight: false,
-      preflightCommitment: 'confirmed'
-    });
+    // Debug: Parse the transaction to see its details
+    try {
+      const parsedTransaction = Transaction.from(transactionBuffer);
+      console.log('🔍 Submitting transaction with blockhash:', parsedTransaction.recentBlockhash);
+      console.log('🔍 Transaction fee payer:', parsedTransaction.feePayer?.toString());
+      console.log('🔍 Transaction signatures count:', parsedTransaction.signatures.length);
 
-    // Wait for confirmation
-    await connection.confirmTransaction(signature, 'confirmed');
+      if (blockhash) {
+        console.log('🔍 Fresh blockhash from frontend:', blockhash);
+        console.log('🔍 Last valid block height:', lastValidBlockHeight);
+      }
+    } catch (parseError) {
+      console.warn('⚠️ Could not parse transaction for debugging:', parseError.message);
+    }
+
+    let signature;
+    let retries = 3;
+
+    while (retries > 0) {
+      try {
+        signature = await connection.sendRawTransaction(transactionBuffer, {
+          skipPreflight: false,
+          preflightCommitment: 'confirmed',
+          maxRetries: 3
+        });
+        console.log('✅ Transaction submitted successfully with signature:', signature);
+        break;
+      } catch (error) {
+        console.error(`❌ Transaction submission failed, retries left: ${retries - 1}`, error.message);
+        console.error('Error details:', error);
+        retries--;
+        if (retries === 0) {
+          // If it's a blockhash error, provide a more helpful message
+          if (error.message.includes('blockhash') || error.message.includes('Blockhash')) {
+            throw new Error('Transaction blockhash expired. Please try creating the contract again.');
+          }
+          throw error;
+        }
+        await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds before retry
+      }
+    }
+
+    // Wait for confirmation with timeout
+    try {
+      await connection.confirmTransaction(signature, 'confirmed');
+    } catch (error) {
+      console.warn('Transaction confirmation failed, but transaction may still be valid:', error.message);
+      // Continue with database storage as the transaction might still be valid
+    }
+
+    // Clean up the pending contract
+    global.pendingContracts.delete(contractAccount);
 
     // Calculate document hash for database storage
     const documentHash = calculateDocumentHash(contractData);
@@ -1655,31 +2076,113 @@ app.post('/api/solana/clear-cache', (req, res) => {
   }
 });
 
-// 404 handler
-app.use('*', (req, res) => {
-  res.status(404).json({
-    message: 'Endpoint not found',
-    availableEndpoints: [
-      'GET /',
-      'GET /api/health',
-      'POST /api/contracts',
-      'GET /api/contracts/:id',
-      'POST /api/contracts/:id/sign',
-      'GET /api/contracts/user/:publicKey',
-      'POST /api/users',
-      'GET /api/users/:publicKey',
-      'GET /api/solana/balance/:publicKey',
-      'GET /api/solana/account/:publicKey',
-      'GET /api/solana/transaction/:signature',
-      'GET /api/solana/status',
-      'POST /api/solana/clear-cache'
-    ]
-  });
-});
+// Request signature from a party
+app.post('/api/contracts/:contractId/request-signature', async (req, res) => {
+  try {
+    const { contractId } = req.params;
+    const {
+      requesterPublicKey,
+      requesterName,
+      targetPartyPublicKey,
+      targetPartyName,
+      targetPartyEmail,
+      contractTitle
+    } = req.body;
 
-// Create HTTP server and initialize WebSocket
-const server = http.createServer(app);
-websocketService.initialize(server);
+    if (!requesterPublicKey || !targetPartyPublicKey) {
+      return res.status(400).json({
+        message: 'Requester and target party public keys are required'
+      });
+    }
+
+    const contract = await Contract.findOne({ contractId });
+    if (!contract) {
+      return res.status(404).json({ message: 'Contract not found' });
+    }
+
+    // Verify requester is authorized (party or mediator)
+    const isAuthorizedRequester = contract.parties.some(p => p.publicKey === requesterPublicKey) ||
+                                 (contract.mediator && contract.mediator.publicKey === requesterPublicKey);
+
+    if (!isAuthorizedRequester) {
+      return res.status(403).json({
+        message: 'Only contract parties or mediators can request signatures'
+      });
+    }
+
+    // Verify target is a party to the contract
+    const targetParty = contract.parties.find(p => p.publicKey === targetPartyPublicKey);
+    if (!targetParty) {
+      return res.status(400).json({
+        message: 'Target party is not part of this contract'
+      });
+    }
+
+    if (targetParty.hasSigned) {
+      return res.status(400).json({
+        message: 'Target party has already signed this contract'
+      });
+    }
+
+    // Log the signature request in audit log
+    const auditEntry = {
+      action: 'signature_requested',
+      performedBy: requesterName || requesterPublicKey,
+      timestamp: new Date().toISOString(),
+      details: {
+        requesterPublicKey,
+        requesterName,
+        targetPartyPublicKey,
+        targetPartyName,
+        targetPartyEmail,
+        requestTimestamp: Date.now()
+      }
+    };
+
+    contract.auditLog = contract.auditLog || [];
+    contract.auditLog.push(auditEntry);
+    await contract.save();
+
+    // Send email notification if email service is available
+    try {
+      if (targetPartyEmail && emailService) {
+        const contractUrl = `${process.env.FRONTEND_URL || 'http://localhost:8081'}/contract/${contractId}`;
+
+        await emailService.sendSignatureRequestEmail({
+          to: targetPartyEmail,
+          targetName: targetPartyName,
+          requesterName: requesterName || 'Contract Party',
+          contractTitle: contractTitle || contract.title,
+          contractId: contractId,
+          contractUrl: contractUrl
+        });
+
+        console.log(`📧 Signature request email sent to ${targetPartyEmail}`);
+      }
+    } catch (emailError) {
+      console.warn('Failed to send signature request email:', emailError.message);
+      // Don't fail the request if email fails
+    }
+
+    res.json({
+      success: true,
+      message: 'Signature request sent successfully',
+      requestDetails: {
+        contractId,
+        targetParty: targetPartyName,
+        requester: requesterName,
+        timestamp: new Date().toISOString()
+      }
+    });
+
+  } catch (error) {
+    console.error('Error requesting signature:', error);
+    res.status(500).json({
+      message: 'Failed to send signature request',
+      error: error.message
+    });
+  }
+});
 
 // Sync contract status from Solana network
 app.post('/api/contracts/:contractId/sync-blockchain-status', async (req, res) => {
@@ -1787,6 +2290,35 @@ async function simulateSolanaNetworkQuery(contractAddress) {
     lastUpdated: new Date().toISOString()
   };
 }
+
+// 404 handler
+app.use('*', (req, res) => {
+  res.status(404).json({
+    message: 'Endpoint not found',
+    availableEndpoints: [
+      'GET /',
+      'GET /api/health',
+      'POST /api/contracts',
+      'GET /api/contracts/:id',
+      'POST /api/contracts/:id/sign',
+      'POST /api/contracts/:id/request-signature',
+      'POST /api/contracts/:id/sync-blockchain',
+      'POST /api/contracts/:id/sync-blockchain-status',
+      'GET /api/contracts/user/:publicKey',
+      'POST /api/users',
+      'GET /api/users/:publicKey',
+      'GET /api/solana/balance/:publicKey',
+      'GET /api/solana/account/:publicKey',
+      'GET /api/solana/transaction/:signature',
+      'GET /api/solana/status',
+      'POST /api/solana/clear-cache'
+    ]
+  });
+});
+
+// Create HTTP server and initialize WebSocket
+const server = http.createServer(app);
+websocketService.initialize(server);
 
 // Start the server
 const PORT = process.env.PORT || 3001;

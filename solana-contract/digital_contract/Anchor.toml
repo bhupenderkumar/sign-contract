@@ -1,15 +1,18 @@
 [toolchain]
-anchor_version = "0.31.1"
+anchor_version = "0.30.1"
 
 [features]
 seeds = false
 skip-lint = false
 
 [programs.devnet]
-digital_contract = "4bmYTgHAoYfBBwoELVqUzc9n8DTfFvtt7CodYq78wzir"
+digital_contract = "7ow2v1f2EFNWQAVwn6aXih3kuXBP5FAX9ni48Uqva1LK"
+
+[programs.testnet]
+digital_contract = "7ow2v1f2EFNWQAVwn6aXih3kuXBP5FAX9ni48Uqva1LK"
 
 [programs.localnet]
-digital_contract = "4bmYTgHAoYfBBwoELVqUzc9n8DTfFvtt7CodYq78wzir"
+digital_contract = "7ow2v1f2EFNWQAVwn6aXih3kuXBP5FAX9ni48Uqva1LK"
 
 [registry]
 url = "https://api.apr.dev"

@@ -162,6 +162,7 @@ export const useNetworkAwareApi = () => {
       headers: {
         'Content-Type': 'application/json',
         'X-Solana-Network': currentNetwork,
+        'X-Program-ID': import.meta.env.VITE_PROGRAM_ID || '7ow2v1f2EFNWQAVwn6aXih3kuXBP5FAX9ni48Uqva1LK',
         ...options.headers,
       },
     });

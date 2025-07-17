@@ -22,12 +22,22 @@ class SolanaContractService {
   }
 
   /**
+   * Generate a unique contract ID
+   */
+  static generateContractId() {
+    return crypto.randomBytes(16).toString('hex');
+  }
+
+  /**
    * Prepare a contract transaction for user signing (user pays fees)
    */
   async prepareContractTransaction(contractData, userPublicKey) {
     try {
-      // Generate a unique contract account
-      const contractAccount = Keypair.generate();
+      // Generate contract account keypair (always use keypair for better compatibility)
+      const contractAccountKeypair = Keypair.generate();
+      const contractAccount = contractAccountKeypair;
+
+      console.log('✅ Generated contract account:', contractAccount.publicKey.toString());
 
       // Calculate contract value (default to 0.1 SOL if not provided)
       const contractValueSOL = contractData.contractValue || 0.1;
@@ -70,9 +80,9 @@ class SolanaContractService {
       console.log('🔍 Contract creation parameters:');
       console.log('  documentHash:', documentHash);
       console.log('  title:', contractData.title);
-      console.log('  partyPublicKeys:', partyPublicKeys);
-      console.log('  mediatorPubkey:', mediatorPubkey);
-      console.log('  expiryTimestamp:', expiryTimestamp);
+      console.log('  partyPublicKeys:', partyPublicKeys.map(pk => pk.toString()));
+      console.log('  mediatorPubkey:', mediatorPubkey?.toString());
+      console.log('  expiryTimestamp:', expiryTimestamp?.toString());
 
       // Create the transaction instruction
       const instruction = await this.program.methods
@@ -82,7 +92,7 @@ class SolanaContractService {
           partyPublicKeys,
           mediatorPubkey,
           expiryTimestamp,
-          new anchor.BN(contractValueLamports) // Add the missing contract value parameter
+          new anchor.BN(contractValueLamports)
         )
         .accounts({
           contract: contractAccount.publicKey,
@@ -92,18 +102,18 @@ class SolanaContractService {
         })
         .instruction();
 
-      // Create transaction
+      // Create transaction with temporary blockhash for serialization
       const transaction = new Transaction();
       transaction.add(instruction);
-
-      // Get recent blockhash
-      const { blockhash } = await this.connection.getLatestBlockhash();
-      transaction.recentBlockhash = blockhash;
       transaction.feePayer = new PublicKey(userPublicKey);
+      // Set temporary blockhash for serialization (will be replaced with fresh one later)
+      transaction.recentBlockhash = '11111111111111111111111111111111';
 
-      // Note: Contract account doesn't need to sign since it's created with init constraint
+      console.log('✅ Transaction prepared with temporary blockhash (backend will handle final submission)');
+      console.log('✅ Transaction fee payer:', transaction.feePayer.toString());
+      console.log('✅ Contract account will be signed by backend during finalization');
 
-      // Serialize transaction for frontend
+      // Serialize transaction for frontend (with temporary blockhash)
       const serializedTransaction = transaction.serialize({
         requireAllSignatures: false,
         verifySignatures: false
@@ -113,12 +123,235 @@ class SolanaContractService {
         success: true,
         serializedTransaction: Buffer.from(serializedTransaction).toString('base64'),
         contractAccount: contractAccount.publicKey.toString(),
+        contractAccountKeypair: contractAccountKeypair,
         platformFee: platformFeeLamports / LAMPORTS_PER_SOL,
-        contractValue: contractValueSOL
+        contractValue: contractValueSOL,
+        userPublicKey: userPublicKey
       };
 
     } catch (error) {
       console.error('Error preparing contract transaction:', error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+
+  /**
+   * Prepare a contract creation transaction for user signing
+   */
+  async prepareContractCreationTransaction(contractData, userPublicKey) {
+    try {
+      console.log('🔄 Preparing contract creation transaction...');
+
+      // Generate a new contract account keypair
+      const contractAccountKeypair = Keypair.generate();
+      console.log('✅ Generated contract account:', contractAccountKeypair.publicKey.toString());
+
+      // Calculate contract value (default to 0.1 SOL if not provided)
+      const contractValueSOL = contractData.contractValue || 0.1;
+      const contractValueLamports = contractValueSOL * LAMPORTS_PER_SOL;
+
+      // Calculate platform fee (0.1% of contract value)
+      const platformFeeSOL = contractValueSOL * this.platformFeePercentage;
+      const platformFeeLamports = Math.max(
+        Math.min(platformFeeSOL * LAMPORTS_PER_SOL, 100_000_000), // Max 0.1 SOL
+        1_000_000 // Min 0.001 SOL
+      );
+
+      let partyPublicKeys;
+      if (contractData.parties && Array.isArray(contractData.parties)) {
+        partyPublicKeys = contractData.parties.map(party => new PublicKey(party.publicKey));
+      } else {
+        partyPublicKeys = [
+          new PublicKey(contractData.party1PublicKey),
+          new PublicKey(contractData.party2PublicKey)
+        ];
+      }
+
+      // Handle mediator
+      let mediatorPubkey = null;
+      if (contractData.useMediator && contractData.mediatorPublicKey) {
+        mediatorPubkey = new PublicKey(contractData.mediatorPublicKey);
+      } else if (contractData.mediator && contractData.mediator.publicKey) {
+        mediatorPubkey = new PublicKey(contractData.mediator.publicKey);
+      }
+
+      // Handle expiry date
+      let expiryTimestamp = null;
+      if (contractData.expiryDate) {
+        expiryTimestamp = new anchor.BN(Math.floor(new Date(contractData.expiryDate).getTime() / 1000));
+      }
+
+      // Calculate document hash
+      const documentHash = this.calculateDocumentHash(contractData);
+
+      console.log('🔍 Contract creation parameters:');
+      console.log('  documentHash:', documentHash);
+      console.log('  title:', contractData.title);
+      console.log('  partyPublicKeys:', partyPublicKeys.map(pk => pk.toString()));
+      console.log('  mediatorPubkey:', mediatorPubkey?.toString());
+      console.log('  expiryTimestamp:', expiryTimestamp?.toString());
+
+      // Create the transaction instruction
+      const instruction = await this.program.methods
+        .createContract(
+          documentHash,
+          contractData.title,
+          partyPublicKeys,
+          mediatorPubkey,
+          expiryTimestamp,
+          new anchor.BN(contractValueLamports)
+        )
+        .accounts({
+          contract: contractAccountKeypair.publicKey,
+          creator: new PublicKey(userPublicKey),
+          platformFeeRecipient: this.platformFeeRecipient,
+          systemProgram: SystemProgram.programId,
+        })
+        .instruction();
+
+      // Create transaction with fresh blockhash
+      const transactionData = await this.createTransactionForSigning(
+        instruction,
+        userPublicKey,
+        contractAccountKeypair
+      );
+
+      return {
+        success: true,
+        ...transactionData,
+        contractAddress: contractAccountKeypair.publicKey.toString(),
+        platformFee: platformFeeLamports / LAMPORTS_PER_SOL,
+        contractValue: contractValueSOL,
+        contractAccountKeypair: Array.from(contractAccountKeypair.secretKey) // Send as array for JSON serialization
+      };
+
+    } catch (error) {
+      console.error('Error preparing contract creation transaction:', error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+
+  /**
+   * Submit a signed contract creation transaction
+   */
+  async submitSignedContractTransaction(signedTransactionBase64, contractAddress) {
+    try {
+      console.log('� Submitting signed contract transaction...');
+
+      // Deserialize the signed transaction
+      const signedTransaction = Transaction.from(Buffer.from(signedTransactionBase64, 'base64'));
+
+      // Send the transaction
+      const signature = await this.connection.sendRawTransaction(signedTransaction.serialize(), {
+        skipPreflight: false,
+        preflightCommitment: 'confirmed'
+      });
+
+      // Wait for confirmation
+      const confirmation = await this.connection.confirmTransaction(signature, 'confirmed');
+
+      if (confirmation.value.err) {
+        throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
+      }
+
+      console.log('✅ Contract created successfully!');
+      console.log('📍 Transaction ID:', signature);
+      console.log('📍 Contract Address:', contractAddress);
+
+      return {
+        success: true,
+        transactionId: signature,
+        contractAddress: contractAddress
+      };
+
+    } catch (error) {
+      console.error('Error submitting signed contract transaction:', error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+
+  /**
+   * Create a transaction with fresh blockhash for frontend signing
+   */
+  async createTransactionForSigning(instruction, userPublicKey, contractAccountKeypair) {
+    try {
+      // Get fresh blockhash
+      const blockhashResult = await this.getFreshBlockhash();
+      if (!blockhashResult.success) {
+        throw new Error(`Failed to get fresh blockhash: ${blockhashResult.error}`);
+      }
+
+      // Create transaction with fresh blockhash
+      const transaction = new Transaction();
+      transaction.add(instruction);
+      transaction.feePayer = new PublicKey(userPublicKey);
+      transaction.recentBlockhash = blockhashResult.blockhash;
+
+      console.log('📝 Transaction prepared with fresh blockhash for frontend. Contract account:', contractAccountKeypair?.publicKey.toString());
+      console.log('📝 Fresh blockhash:', blockhashResult.blockhash);
+
+      // Serialize transaction for frontend
+      const serializedTransaction = transaction.serialize({
+        requireAllSignatures: false,
+        verifySignatures: false
+      });
+
+      return {
+        success: true,
+        transactionBase64: Buffer.from(serializedTransaction).toString('base64'),
+        contractAccountKeypair: contractAccountKeypair // Return this for potential use in submission
+      };
+
+    } catch (error) {
+      console.error('Error creating transaction for signing:', error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+
+  /**
+   * Get fresh blockhash for frontend
+   */
+  async getFreshBlockhash() {
+    try {
+      let retries = 3;
+
+      while (retries > 0) {
+        try {
+          const result = await this.connection.getLatestBlockhash('confirmed');
+          
+          // Validate the blockhash
+          if (!result.blockhash || result.blockhash.length !== 44) {
+            throw new Error('Invalid blockhash received from RPC');
+          }
+          
+          console.log('✅ Fresh blockhash obtained:', result.blockhash);
+          
+          return {
+            success: true,
+            blockhash: result.blockhash,
+            lastValidBlockHeight: result.lastValidBlockHeight
+          };
+        } catch (error) {
+          console.warn(`Failed to get blockhash, retries left: ${retries - 1}`, error.message);
+          retries--;
+          if (retries === 0) throw error;
+          await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second before retry
+        }
+      }
+    } catch (error) {
+      console.error('Error getting fresh blockhash:', error);
       return {
         success: false,
         error: error.message
@@ -232,25 +465,10 @@ class SolanaContractService {
         })
         .instruction();
 
-      // Create transaction
-      const transaction = new Transaction();
-      transaction.add(instruction);
+      // Use the new method to create transaction with fresh blockhash
+      const transactionData = await this.createTransactionForSigning(instruction, userPublicKey, null);
 
-      // Get recent blockhash
-      const { blockhash } = await this.connection.getLatestBlockhash();
-      transaction.recentBlockhash = blockhash;
-      transaction.feePayer = new PublicKey(userPublicKey);
-
-      // Serialize transaction for frontend
-      const serializedTransaction = transaction.serialize({
-        requireAllSignatures: false,
-        verifySignatures: false
-      });
-
-      return {
-        success: true,
-        serializedTransaction: Buffer.from(serializedTransaction).toString('base64')
-      };
+      return transactionData;
 
     } catch (error) {
       console.error('Error preparing signing transaction:', error);

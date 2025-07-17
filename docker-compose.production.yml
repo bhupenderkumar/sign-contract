@@ -16,6 +16,7 @@ services:
       - REACT_APP_API_URL=http://backend:3001
       - REACT_APP_SOLANA_CLUSTER=mainnet-beta
       - REACT_APP_PLATFORM_FEE_RECIPIENT=BcSXav3jcBKRbN6woZsqPMJGYrS2MXwVEdtUx1ZzD9Xo
+      - VITE_PROGRAM_ID=7ow2v1f2EFNWQAVwn6aXih3kuXBP5FAX9ni48Uqva1LK
     networks:
       - digital_contract_network
     depends_on:

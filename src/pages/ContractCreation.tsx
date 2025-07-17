@@ -44,6 +44,7 @@ const ContractCreation = () => {
   const { toast } = useToast();
   const { connected, publicKey } = useWallet();
   const { signMessage, signTransaction } = useSolanaWallet();
+  const { connection } = useWallet();
   const {
     isWalletReady,
     loading: wsLoading,
@@ -466,71 +467,130 @@ const ContractCreation = () => {
         try {
           const contractId = `contract_${Date.now()}`;
           setDeploymentContractId(contractId);
-          const message = `Digital Contract CREATE\n\nContract ID: ${contractId}\nTimestamp: ${Date.now()}\n\nBy signing this message, you confirm your intent to create this contract.`;
-          const messageBytes = new TextEncoder().encode(message);
 
-          // Try to get message signature from wallet
-          let signatureBase64: string;
+          console.log('📝 Starting contract creation process');
 
+          // Step 1: Create contract directly with backend (new simplified approach)
+          console.log('🔄 Creating contract directly with backend...');
+
+          // Prepare contract data
+          const contractData = {
+            contractId: `contract_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`,
+            title: formData.contractTitle,
+            description: formData.contractDescription,
+            agreementText: formData.agreementText,
+            structuredClauses: formData.structuredClauses,
+            parties: [
+              {
+                publicKey: formData.party1PublicKey || publicKey.toString(),
+                name: formData.party1Name,
+                email: formData.party1Email
+              },
+              {
+                publicKey: formData.party2PublicKey,
+                name: formData.party2Name,
+                email: formData.party2Email
+              },
+              ...formData.additionalParties.map(party => ({
+                publicKey: party.publicKey,
+                name: party.name,
+                email: party.email
+              }))
+            ],
+            mediator: formData.useMediator ? {
+              name: formData.mediatorName,
+              email: formData.mediatorEmail,
+              publicKey: null // Mediator public key will be set later
+            } : null,
+            useMediator: formData.useMediator,
+            expiryDate: null,
+            contractValue: 0.1
+          };
+
+          // Get user signature for the contract creation
+          const contractMessage = `Contract Creation Request\nContract: ${contractData.title}\nUser: ${publicKey.toString()}\nTimestamp: ${Date.now()}`;
+
+          let userSignature: string;
           if (signMessage) {
             try {
+              const messageBytes = new TextEncoder().encode(contractMessage);
               const signature = await signMessage(messageBytes);
-              signatureBase64 = Buffer.from(signature).toString('base64');
+              userSignature = Buffer.from(signature).toString('base64');
+              console.log('✅ User signature obtained for contract creation');
             } catch (error) {
-              console.log('Message signing failed, using public key as proof');
-              signatureBase64 = Buffer.from(publicKey!.toBytes()).toString('base64');
+              console.warn('⚠️ Message signing failed, using public key as proof:', error);
+              userSignature = publicKey.toString();
             }
           } else {
-            // Fallback: use public key as proof of ownership
-            signatureBase64 = Buffer.from(publicKey!.toBytes()).toString('base64');
-            console.log('Wallet does not support message signing, using public key as proof');
+            console.warn('⚠️ Wallet does not support message signing, using public key as proof');
+            userSignature = publicKey.toString();
           }
 
-          // Step 1: Prepare the transaction
-          const prepareResponse = await fetch('http://localhost:3001/api/contracts/prepare-transaction', {
+          // Step 2: Prepare transaction for user signing
+          console.log('🔄 Preparing transaction for user signing...');
+          const prepareResponse = await fetch('http://localhost:3001/api/contracts/prepare-creation-transaction', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
             },
             body: JSON.stringify({
-              contractTitle: formData.contractTitle,
-              contractDescription: formData.contractDescription,
-              agreementText: formData.agreementText,
-              structuredClauses: formData.structuredClauses,
-              party1Name: formData.party1Name,
-              party1Email: formData.party1Email,
-              party1PublicKey: formData.party1PublicKey || publicKey.toString(),
-              party1Signature: signatureBase64,
-              party1Message: message,
-              party2Name: formData.party2Name,
-              party2Email: formData.party2Email,
-              party2PublicKey: formData.party2PublicKey,
-              additionalParties: formData.additionalParties,
-              mediatorName: formData.useMediator ? formData.mediatorName : undefined,
-              mediatorEmail: formData.useMediator ? formData.mediatorEmail : undefined,
-              useMediator: formData.useMediator,
-              expiryDate: null, // Handle expiry date if needed
-              contractValue: 0.1 // Default contract value in SOL
+              contractData: contractData,
+              userPublicKey: publicKey.toString(),
+              userSignature: userSignature,
+              message: contractMessage
             }),
           });
 
           if (!prepareResponse.ok) {
-            throw new Error('Failed to prepare transaction');
+            const errorData = await prepareResponse.json();
+            throw new Error(errorData.error || 'Failed to prepare transaction');
           }
 
-          const { transactionData } = await prepareResponse.json();
+          const prepareResult = await prepareResponse.json();
+          console.log('✅ Transaction prepared successfully');
+          console.log('🔍 Prepare result:', prepareResult);
+          console.log('🔍 Prepare result data:', prepareResult.data);
+          console.log('🔍 Transaction base64:', prepareResult.data?.transactionBase64);
 
-          // Step 2: Sign the transaction with user's wallet
-          const transactionBuffer = Buffer.from(transactionData.serializedTransaction, 'base64');
-          const transaction = Transaction.from(transactionBuffer);
+          // Step 3: Sign the transaction with user's wallet
+          console.log('🔄 Signing transaction with wallet...');
 
           if (!signTransaction) {
             throw new Error('Wallet does not support transaction signing');
           }
 
-          const signedTransaction = await signTransaction(transaction);
+          // Check if transactionBase64 exists
+          if (!prepareResult.data?.transactionBase64) {
+            throw new Error('Transaction data not received from backend');
+          }
 
-          // Step 3: Submit the signed transaction
+          // Reconstruct the transaction from the prepared data
+          const transaction = Transaction.from(Buffer.from(prepareResult.data.transactionBase64, 'base64'));
+
+          // Create the contract account keypair
+          const { Keypair } = await import('@solana/web3.js');
+          const contractAccountKeypair = Keypair.fromSecretKey(
+            new Uint8Array(prepareResult.data.contractAccountKeypair)
+          );
+
+          // Add the contract account as a signer to the transaction
+          // This is needed because the transaction loses signer info during serialization
+          if (!transaction.signatures.find(sig => sig.publicKey.equals(contractAccountKeypair.publicKey))) {
+            transaction.signatures.push({
+              signature: null,
+              publicKey: contractAccountKeypair.publicKey
+            });
+          }
+
+          // Sign the transaction with the contract account first
+          transaction.partialSign(contractAccountKeypair);
+
+          // Sign with user's wallet
+          const signedTransaction = await signTransaction(transaction);
+          console.log('✅ Transaction signed successfully');
+
+          // Step 4: Submit the signed transaction
+          console.log('🔄 Submitting signed transaction...');
           response = await fetch('http://localhost:3001/api/contracts/submit-signed-transaction', {
             method: 'POST',
             headers: {
@@ -538,17 +598,39 @@ const ContractCreation = () => {
             },
             body: JSON.stringify({
               signedTransaction: Buffer.from(signedTransaction.serialize()).toString('base64'),
-              contractData: transactionData.contractData,
-              contractAccount: transactionData.contractAccount,
-              platformFee: transactionData.platformFee,
-              contractValue: transactionData.contractValue
+              contractAddress: prepareResult.data.contractAddress,
+              contractData: contractData,
+              userPublicKey: publicKey.toString()
             }),
           });
-        } catch (error) {
+        } catch (error: any) {
           setIsDeploying(false);
+          console.error('Contract creation error:', error);
+          console.error('Error details:', {
+            message: error.message,
+            code: error.code,
+            stack: error.stack
+          });
+
+          let errorMessage = "Failed to create contract. Please try again.";
+
+          // Handle specific error types
+          if (error.message?.includes('blockhash') || error.message?.includes('Blockhash')) {
+            errorMessage = "Transaction blockhash expired. This might be a network timing issue. Please try again.";
+            console.error('🚨 Blockhash expiration detected - this should not happen with fresh blockhash approach');
+          } else if (error.message?.includes('User rejected')) {
+            errorMessage = "Transaction was rejected. Please try again if you want to create the contract.";
+          } else if (error.message?.includes('Insufficient funds')) {
+            errorMessage = "Insufficient SOL balance. Please add funds to your wallet and try again.";
+          } else if (error.message?.includes('Network')) {
+            errorMessage = "Network error. Please check your connection and try again.";
+          } else if (error.message?.includes('unknown signer')) {
+            errorMessage = "Transaction signing error. Please try again.";
+          }
+
           toast({
-            title: "Signature Failed",
-            description: "Failed to sign the contract creation message. Please try again.",
+            title: "Contract Creation Failed",
+            description: errorMessage,
             variant: "destructive",
           });
           return;
@@ -572,7 +654,11 @@ const ContractCreation = () => {
 
         if (formData.useBlockchain) {
           // Handle blockchain contract creation success
-          const successMessage = `Blockchain contract created! Contract ID: ${result.contract?.id || 'N/A'}`;
+          const contractId = result.data?.contractId || 'N/A';
+          const transactionId = result.data?.transactionId || 'N/A';
+          const contractAddress = result.data?.contractAddress || 'N/A';
+
+          const successMessage = `Contract ID: ${contractId}\nTransaction: ${transactionId}\nAddress: ${contractAddress}`;
 
           toast({
             title: "Blockchain Contract Created!",
@@ -581,8 +667,8 @@ const ContractCreation = () => {
           });
 
           // Navigate to the contract details page if we have the contract ID
-          if (result.contract?.id) {
-            navigate(`/contract/${result.contract.id}`);
+          if (result.data?.contractId) {
+            navigate(`/contract/${result.data.contractId}`);
           } else {
             navigate('/');
           }

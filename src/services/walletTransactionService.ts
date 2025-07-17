@@ -1,5 +1,7 @@
 import { Connection, PublicKey, Transaction, SystemProgram, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { WalletContextState } from '@solana/wallet-adapter-react';
+import { getNetworkConfig, getCurrentNetwork } from '@/config/environment';
+import { PROGRAM_ID, PLATFORM_FEE_RECIPIENT, PLATFORM_FEE_AMOUNT } from '@/config/solana';
 
 export interface ContractSigningResult {
   success: boolean;
@@ -18,8 +20,9 @@ class WalletTransactionService {
   private connection: Connection;
 
   constructor() {
-    // Use devnet for our application
-    this.connection = new Connection('https://api.devnet.solana.com', 'confirmed');
+    // Use current network configuration
+    const networkConfig = getNetworkConfig();
+    this.connection = new Connection(networkConfig.rpcUrl, 'confirmed');
   }
 
   /**
@@ -144,8 +147,8 @@ class WalletTransactionService {
    */
   async createPlatformFeeTransaction(
     fromPublicKey: PublicKey,
-    platformFeeRecipient: PublicKey,
-    feeAmount: number = 0.01 // 0.01 SOL default
+    platformFeeRecipient: PublicKey = PLATFORM_FEE_RECIPIENT,
+    feeAmount: number = PLATFORM_FEE_AMOUNT
   ): Promise<Transaction> {
     const transaction = new Transaction();
     
@@ -203,7 +206,7 @@ class WalletTransactionService {
    */
   async hasSufficientBalance(
     publicKey: PublicKey,
-    requiredAmount: number = 0.01
+    requiredAmount: number = PLATFORM_FEE_AMOUNT
   ): Promise<boolean> {
     const balance = await this.getWalletBalance(publicKey);
     return balance >= requiredAmount;
@@ -230,7 +233,7 @@ class WalletTransactionService {
       if (!hasBalance) {
         return {
           success: false,
-          error: 'Insufficient balance. You need at least 0.01 SOL for the platform fee.'
+          error: `Insufficient balance. You need at least ${PLATFORM_FEE_AMOUNT} SOL for the platform fee.`
         };
       }
 
@@ -250,7 +253,7 @@ class WalletTransactionService {
       // Create platform fee transaction
       const transaction = await this.createPlatformFeeTransaction(
         wallet.publicKey,
-        new PublicKey(platformFeeRecipient)
+        platformFeeRecipient ? new PublicKey(platformFeeRecipient) : PLATFORM_FEE_RECIPIENT
       );
 
       // Request user to sign the transaction

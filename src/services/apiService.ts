@@ -1,4 +1,5 @@
 import { getCurrentNetwork } from '@/config/environment';
+import { PROGRAM_ID } from '@/config/solana';
 
 const API_BASE_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
 
@@ -29,6 +30,7 @@ class ApiService {
       headers: {
         'Content-Type': 'application/json',
         'X-Solana-Network': currentNetwork,
+        'X-Program-ID': PROGRAM_ID.toString(),
         ...options.headers,
       },
       ...options,
